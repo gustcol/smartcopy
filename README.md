@@ -190,24 +190,14 @@ smartcopy benchmark /tmp/benchmark --size 1G
 
 **Use Case**: Backup important data nightly with integrity verification.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    DAILY BACKUP WORKFLOW                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌─────────────┐    ┌──────────────┐            │
-│  │  Source  │───▶│  SmartCopy  │───▶│  Destination │            │
-│  │  /data   │    │ --incremental│   │  /backup     │            │
-│  └──────────┘    │ --verify     │    └──────────────┘            │
-│                  └──────┬──────┘                                 │
-│                         │                                        │
-│                         ▼                                        │
-│                  ┌─────────────┐                                 │
-│                  │  Manifest   │  ← Tracks changes               │
-│                  │  .json/.bin │                                 │
-│                  └─────────────┘                                 │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph DAILY_BACKUP["DAILY BACKUP WORKFLOW"]
+        A[Source<br>/data] --> B[SmartCopy<br>--incremental<br>--verify]
+        B --> C[Destination<br>/backup]
+        B --> D[Manifest<br>.json/.bin]
+        D -.-> |Tracks changes| D
+    end
 ```
 
 **Commands:**
@@ -228,28 +218,16 @@ smartcopy /data /backup --incremental --verify blake3
 
 **Use Case**: Move terabytes of simulation data between HPC clusters.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  HPC DATA MIGRATION FLOW                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐         ┌──────────────┐                      │
-│  │  HPC Node A  │         │  HPC Node B  │                      │
-│  │  /scratch    │         │  /scratch    │                      │
-│  └──────┬───────┘         └──────▲───────┘                      │
-│         │                        │                               │
-│         │    ┌──────────────┐    │                               │
-│         └───▶│   SmartCopy  │────┘                               │
-│              │   + Agent    │                                    │
-│              └──────┬───────┘                                    │
-│                     │                                            │
-│         ┌───────────┼───────────┐                                │
-│         ▼           ▼           ▼                                │
-│    ┌─────────┐ ┌─────────┐ ┌─────────┐                          │
-│    │Thread 1 │ │Thread 2 │ │Thread N │  ← Parallel transfers    │
-│    └─────────┘ └─────────┘ └─────────┘                          │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph HPC_MIGRATION["HPC DATA MIGRATION FLOW"]
+        A[HPC Node A<br>/scratch] --> C[SmartCopy<br>+ Agent]
+        C --> B[HPC Node B<br>/scratch]
+        C --> T1[Thread 1]
+        C --> T2[Thread 2]
+        C --> TN[Thread N]
+        T1 & T2 & TN -.-> |Parallel transfers| T1
+    end
 ```
 
 **Commands:**
@@ -279,29 +257,14 @@ smartcopy submit --scheduler slurm \
 
 **Use Case**: Backup sensitive data to S3 with encryption.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│               ENCRYPTED CLOUD BACKUP FLOW                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌─────────────┐    ┌─────────────┐             │
-│  │  Local   │───▶│  Encrypt    │───▶│  Compress   │             │
-│  │  Files   │    │  (AES-256)  │    │  (LZ4)      │             │
-│  └──────────┘    └─────────────┘    └──────┬──────┘             │
-│                                            │                     │
-│                                            ▼                     │
-│                                     ┌─────────────┐              │
-│                                     │   s5cmd     │              │
-│                                     │  (parallel) │              │
-│                                     └──────┬──────┘              │
-│                                            │                     │
-│                                            ▼                     │
-│                                     ┌─────────────┐              │
-│                                     │  S3 Bucket  │              │
-│                                     │  (encrypted)│              │
-│                                     └─────────────┘              │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CLOUD_BACKUP["ENCRYPTED CLOUD BACKUP FLOW"]
+        A[Local<br>Files] --> B[Encrypt<br>AES-256]
+        B --> C[Compress<br>LZ4]
+        C --> D[s5cmd<br>parallel]
+        D --> E[S3 Bucket<br>encrypted]
+    end
 ```
 
 **Commands:**
@@ -330,30 +293,20 @@ smartcopy s3://my-bucket/backups/ /restored/data/ \
 
 **Use Case**: Sync data to remote server during business hours with bandwidth limits.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              BANDWIDTH-SCHEDULED SYNC FLOW                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Time of Day      Bandwidth Limit       Action                   │
-│  ────────────     ───────────────       ──────                   │
-│  09:00 - 18:00    100 MB/s              Limited (business hours) │
-│  18:00 - 22:00    500 MB/s              Moderate                 │
-│  22:00 - 06:00    Unlimited             Full speed               │
-│  06:00 - 09:00    200 MB/s              Morning transition       │
-│                                                                  │
-│  ┌─────────┐      ┌──────────────┐      ┌─────────┐             │
-│  │ Source  │─────▶│  Scheduler   │─────▶│ Remote  │             │
-│  │         │      │  (throttle)  │      │ Server  │             │
-│  └─────────┘      └──────────────┘      └─────────┘             │
-│                         │                                        │
-│                         ▼                                        │
-│                  ┌─────────────┐                                 │
-│                  │   Resume    │  ← Automatic resume             │
-│                  │   State     │    on interruption              │
-│                  └─────────────┘                                 │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph SCHEDULED_SYNC["BANDWIDTH-SCHEDULED SYNC FLOW"]
+        subgraph Schedule["Time-based Limits"]
+            S1["09:00-18:00: 100 MB/s (Business)"]
+            S2["18:00-22:00: 500 MB/s (Moderate)"]
+            S3["22:00-06:00: Unlimited (Full speed)"]
+            S4["06:00-09:00: 200 MB/s (Transition)"]
+        end
+        A[Source] --> B[Scheduler<br>throttle]
+        B --> C[Remote<br>Server]
+        B --> D[Resume<br>State]
+        D -.-> |Automatic resume<br>on interruption| D
+    end
 ```
 
 **Commands:**
@@ -389,32 +342,12 @@ smartcopy /data user@server:/backup --ignore-schedule
 
 **Use Case**: Sync large database files where only portions change.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   DELTA SYNC FLOW                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌────────────────────────────────────────┐                     │
-│  │         Original File (10 GB)          │                     │
-│  │  ████████████████████████████████████  │                     │
-│  └────────────────────────────────────────┘                     │
-│                         │                                        │
-│                         ▼                                        │
-│  ┌────────────────────────────────────────┐                     │
-│  │      Modified File (10 GB)             │                     │
-│  │  ████████░░░░████████████████████████  │                     │
-│  │          ▲                             │  Changed blocks      │
-│  │          │                             │  (only ~500 MB)      │
-│  └──────────┼─────────────────────────────┘                     │
-│             │                                                    │
-│             ▼                                                    │
-│  ┌──────────────────────┐                                       │
-│  │   Delta Transfer     │                                       │
-│  │   ~500 MB instead    │  ← 95% bandwidth savings!             │
-│  │   of 10 GB           │                                       │
-│  └──────────────────────┘                                       │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph DELTA["DELTA SYNC FLOW"]
+        A["Original File (10 GB)<br>████████████████████████████████████"] --> B["Modified File (10 GB)<br>████████░░░░████████████████████████<br>Changed blocks ~500 MB"]
+        B --> C["Delta Transfer<br>~500 MB instead of 10 GB<br>95% bandwidth savings!"]
+    end
 ```
 
 **Commands:**
@@ -441,27 +374,14 @@ smartcopy /data/huge-file.bin /backup/huge-file.bin \
 
 **Use Case**: Deploy software to all nodes in an HPC cluster.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              MULTI-NODE DEPLOYMENT FLOW                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│                    ┌─────────────┐                               │
-│                    │   Master    │                               │
-│                    │    Node     │                               │
-│                    └──────┬──────┘                               │
-│                           │                                      │
-│           ┌───────────────┼───────────────┐                      │
-│           │               │               │                      │
-│           ▼               ▼               ▼                      │
-│    ┌─────────────┐ ┌─────────────┐ ┌─────────────┐              │
-│    │   Node 1    │ │   Node 2    │ │   Node N    │              │
-│    │   Agent     │ │   Agent     │ │   Agent     │              │
-│    └─────────────┘ └─────────────┘ └─────────────┘              │
-│                                                                  │
-│    Transfer happens in parallel to all nodes simultaneously      │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph DEPLOYMENT["MULTI-NODE DEPLOYMENT FLOW"]
+        M[Master<br>Node] --> N1[Node 1<br>Agent]
+        M --> N2[Node 2<br>Agent]
+        M --> NN[Node N<br>Agent]
+        N1 & N2 & NN -.-> |Parallel transfers<br>to all nodes| N1
+    end
 ```
 
 **Commands:**
@@ -493,46 +413,19 @@ wait
 
 ### Decision Flowchart: Choosing the Right Transfer Method
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│           WHICH TRANSFER METHOD SHOULD I USE?                    │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│                    ┌─────────────┐                               │
-│                    │   Start     │                               │
-│                    └──────┬──────┘                               │
-│                           │                                      │
-│                           ▼                                      │
-│                  ┌────────────────┐                              │
-│                  │ Is destination │                              │
-│                  │    remote?     │                              │
-│                  └───────┬────────┘                              │
-│                    Yes   │   No                                  │
-│           ┌──────────────┴──────────────┐                        │
-│           ▼                             ▼                        │
-│  ┌─────────────────┐           ┌─────────────────┐              │
-│  │ Need security?  │           │  Local copy     │              │
-│  └────────┬────────┘           │  (fastest)      │              │
-│     Yes   │   No               └─────────────────┘              │
-│    ┌──────┴──────┐              Use: smartcopy /src /dst        │
-│    ▼             ▼                    --threads 16              │
-│ ┌──────┐    ┌──────────┐                                        │
-│ │ SSH  │    │ Trusted  │                                        │
-│ │      │    │   LAN?   │                                        │
-│ └──┬───┘    └────┬─────┘                                        │
-│    │         Yes │ No                                           │
-│    │        ┌────┴────┐                                         │
-│    │        ▼         ▼                                         │
-│    │   ┌────────┐ ┌────────┐                                    │
-│    │   │  TCP   │ │  QUIC  │                                    │
-│    │   │ Direct │ │        │                                    │
-│    │   └────────┘ └────────┘                                    │
-│    │                                                            │
-│    ▼                                                            │
-│  Use: smartcopy /src user@host:/dst --ssh                       │
-│        --control-master --ssh-cipher aes128-gcm                 │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph DECISION["WHICH TRANSFER METHOD SHOULD I USE?"]
+        Start([Start]) --> Q1{Is destination<br>remote?}
+        Q1 -->|No| LOCAL[Local copy<br>fastest]
+        LOCAL --> CMD1["smartcopy /src /dst<br>--threads 16"]
+        Q1 -->|Yes| Q2{Need security?}
+        Q2 -->|Yes| SSH[SSH]
+        Q2 -->|No| Q3{Trusted LAN?}
+        Q3 -->|Yes| TCP[TCP Direct]
+        Q3 -->|No| QUIC[QUIC]
+        SSH --> CMD2["smartcopy /src user@host:/dst --ssh<br>--control-master --ssh-cipher aes128-gcm"]
+    end
 ```
 
 ## CLI Reference
@@ -1122,37 +1015,31 @@ SmartCopy provides a React-based monitoring dashboard for **large-scale HPC envi
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        DASHBOARD CONTAINER                          │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                   React Dashboard                             │  │
-│  │  - Real-time job monitoring                                   │  │
-│  │  - Transfer history & comparison                              │  │
-│  │  - Agent status                                               │  │
-│  │  - Performance analytics                                      │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                              │                                      │
-│                     nginx reverse proxy                             │
-│                              │                                      │
-└──────────────────────────────┼──────────────────────────────────────┘
-                               │
-                           /api/*
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    HOST SYSTEM (Native)                             │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              SmartCopy API Server                             │  │
-│  │  smartcopy api-server --port 8080 --bind 0.0.0.0             │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              SmartCopy Transfers                              │  │
-│  │  - Direct disk I/O (no container overhead)                   │  │
-│  │  - io_uring, mmap, copy_file_range                           │  │
-│  │  - Maximum performance                                        │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CONTAINER["DASHBOARD CONTAINER"]
+        subgraph REACT["React Dashboard"]
+            R1["Real-time job monitoring"]
+            R2["Transfer history & comparison"]
+            R3["Agent status"]
+            R4["Performance analytics"]
+        end
+        NGINX["nginx reverse proxy"]
+        REACT --> NGINX
+    end
+
+    NGINX -->|/api/*| API
+
+    subgraph HOST["HOST SYSTEM (Native)"]
+        subgraph API_SERVER["SmartCopy API Server"]
+            API["smartcopy api-server<br>--port 8080 --bind 0.0.0.0"]
+        end
+        subgraph TRANSFERS["SmartCopy Transfers"]
+            T1["Direct disk I/O (no container overhead)"]
+            T2["io_uring, mmap, copy_file_range"]
+            T3["Maximum performance"]
+        end
+    end
 ```
 
 **Important**: SmartCopy itself runs natively on the host for maximum I/O performance. Only the dashboard runs in Docker.
@@ -1543,21 +1430,24 @@ smartcopy /data /encrypted/ --encrypt --password \
 
 SmartCopy uses a simple, documented file format:
 
-```
-┌─────────────────────────────────────────┐
-│ Header (64 bytes)                       │
-│  ├─ Magic: "SMCRYPT\0" (8 bytes)        │
-│  ├─ Version: u32 (4 bytes)              │
-│  ├─ Algorithm: u8 (1 byte)              │
-│  ├─ KDF params (if password) (32 bytes) │
-│  ├─ Nonce (12-24 bytes)                 │
-│  └─ Original size: u64 (8 bytes)        │
-├─────────────────────────────────────────┤
-│ Encrypted Chunks                        │
-│  ├─ Chunk 1: data + auth_tag (16 bytes) │
-│  ├─ Chunk 2: data + auth_tag            │
-│  └─ ...                                 │
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph FILE_FORMAT["Encrypted File Format"]
+        subgraph HEADER["Header (64 bytes)"]
+            H1["Magic: 'SMCRYPT\\0' (8 bytes)"]
+            H2["Version: u32 (4 bytes)"]
+            H3["Algorithm: u8 (1 byte)"]
+            H4["KDF params (if password) (32 bytes)"]
+            H5["Nonce (12-24 bytes)"]
+            H6["Original size: u64 (8 bytes)"]
+        end
+        subgraph CHUNKS["Encrypted Chunks"]
+            C1["Chunk 1: data + auth_tag (16 bytes)"]
+            C2["Chunk 2: data + auth_tag"]
+            C3["..."]
+        end
+        HEADER --> CHUNKS
+    end
 ```
 
 ### Security Considerations
