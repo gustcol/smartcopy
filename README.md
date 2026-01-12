@@ -196,7 +196,7 @@ flowchart TD
         A[Source<br>/data] --> B[SmartCopy<br>--incremental<br>--verify]
         B --> C[Destination<br>/backup]
         B --> D[Manifest<br>.json/.bin]
-        D -.-> |Tracks changes| D
+        D -.-> |Next run uses manifest| B
     end
 ```
 
@@ -222,11 +222,10 @@ smartcopy /data /backup --incremental --verify blake3
 flowchart TD
     subgraph HPC_MIGRATION["HPC DATA MIGRATION FLOW"]
         A[HPC Node A<br>/scratch] --> C[SmartCopy<br>+ Agent]
-        C --> B[HPC Node B<br>/scratch]
         C --> T1[Thread 1]
         C --> T2[Thread 2]
         C --> TN[Thread N]
-        T1 & T2 & TN -.-> |Parallel transfers| T1
+        T1 & T2 & TN --> B[HPC Node B<br>/scratch]
     end
 ```
 
@@ -303,9 +302,10 @@ flowchart TD
             S4["06:00-09:00: 200 MB/s (Transition)"]
         end
         A[Source] --> B[Scheduler<br>throttle]
+        Schedule -.-> B
         B --> C[Remote<br>Server]
         B --> D[Resume<br>State]
-        D -.-> |Automatic resume<br>on interruption| D
+        D -.-> |Resumes on<br>interruption| B
     end
 ```
 
@@ -377,10 +377,12 @@ smartcopy /data/huge-file.bin /backup/huge-file.bin \
 ```mermaid
 flowchart TD
     subgraph DEPLOYMENT["MULTI-NODE DEPLOYMENT FLOW"]
-        M[Master<br>Node] --> N1[Node 1<br>Agent]
-        M --> N2[Node 2<br>Agent]
-        M --> NN[Node N<br>Agent]
-        N1 & N2 & NN -.-> |Parallel transfers<br>to all nodes| N1
+        M[Master<br>Node] -->|Parallel| N1[Node 1<br>Agent]
+        M -->|Parallel| N2[Node 2<br>Agent]
+        M -->|Parallel| NN[Node N<br>Agent]
+        N1 --> D1[/opt/software<br>deployed/]
+        N2 --> D2[/opt/software<br>deployed/]
+        NN --> DN[/opt/software<br>deployed/]
     end
 ```
 
@@ -425,6 +427,8 @@ flowchart TD
         Q3 -->|Yes| TCP[TCP Direct]
         Q3 -->|No| QUIC[QUIC]
         SSH --> CMD2["smartcopy /src user@host:/dst --ssh<br>--control-master --ssh-cipher aes128-gcm"]
+        TCP --> CMD3["smartcopy /src host:9878:/dst<br>--tcp-agent"]
+        QUIC --> CMD4["smartcopy /src quic://host:4433/dst"]
     end
 ```
 
@@ -1035,10 +1039,11 @@ flowchart TD
             API["smartcopy api-server<br>--port 8080 --bind 0.0.0.0"]
         end
         subgraph TRANSFERS["SmartCopy Transfers"]
-            T1["Direct disk I/O (no container overhead)"]
-            T2["io_uring, mmap, copy_file_range"]
-            T3["Maximum performance"]
+            T1["Direct disk I/O"]
+            T2["io_uring, mmap"]
+            T3["copy_file_range"]
         end
+        API -->|Controls & monitors| TRANSFERS
     end
 ```
 
