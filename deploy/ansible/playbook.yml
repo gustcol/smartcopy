@@ -1,0 +1,442 @@
+---
+# SmartCopy Agent Deployment Playbook
+#
+# This playbook installs and configures SmartCopy agents on remote hosts.
+#
+# Usage:
+#   ansible-playbook -i inventory.yml playbook.yml
+#
+# Tags:
+#   - install: Install SmartCopy binary
+#   - configure: Configure agent and services
+#   - tuning: Apply kernel tuning
+#   - service: Manage systemd services
+#   - quic: Configure QUIC server
+#
+# Examples:
+#   # Full installation
+#   ansible-playbook -i inventory.yml playbook.yml
+#
+#   # Only apply kernel tuning
+#   ansible-playbook -i inventory.yml playbook.yml --tags tuning
+#
+#   # Install without starting services
+#   ansible-playbook -i inventory.yml playbook.yml --skip-tags service
+
+- name: SmartCopy Agent Deployment
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Default values (can be overridden in inventory)
+    smartcopy_version: "latest"
+    smartcopy_install_dir: "/usr/local/bin"
+    smartcopy_config_dir: "/etc/smartcopy"
+    smartcopy_data_dir: "/var/lib/smartcopy"
+    smartcopy_log_dir: "/var/log/smartcopy"
+    smartcopy_user: "smartcopy"
+    smartcopy_group: "smartcopy"
+
+    # Agent settings
+    smartcopy_agent_protocol: "tcp"
+    smartcopy_agent_port: 9878
+    smartcopy_agent_bind: "0.0.0.0"
+
+    # QUIC settings
+    smartcopy_quic_enabled: false
+    smartcopy_quic_port: 9877
+    smartcopy_quic_bind: "0.0.0.0"
+
+    # Tuning
+    smartcopy_network_speed: "10g"
+    smartcopy_apply_kernel_tuning: true
+    smartcopy_enable_service: true
+
+    # Build from source or download binary
+    smartcopy_build_from_source: false
+    smartcopy_source_dir: "/opt/smartcopy-src"
+
+    # Network tuning parameters by speed tier
+    network_tuning:
+      "10g":
+        rmem_max: 67108864
+        wmem_max: 67108864
+        tcp_rmem: "4096 87380 67108864"
+        tcp_wmem: "4096 65536 67108864"
+        netdev_max_backlog: 30000
+        somaxconn: 4096
+        mtu: 9000
+        ring_buffer: 4096
+
+      "100g":
+        rmem_max: 536870912
+        wmem_max: 536870912
+        tcp_rmem: "4096 87380 536870912"
+        tcp_wmem: "4096 65536 536870912"
+        netdev_max_backlog: 250000
+        netdev_budget: 600
+        somaxconn: 65535
+        mtu: 9000
+        ring_buffer: 16384
+
+      "200g":
+        rmem_max: 1073741824
+        wmem_max: 1073741824
+        tcp_rmem: "4096 87380 1073741824"
+        tcp_wmem: "4096 65536 1073741824"
+        netdev_max_backlog: 500000
+        netdev_budget: 1200
+        optmem_max: 134217728
+        somaxconn: 65535
+        mtu: 9000
+        ring_buffer: 32768
+
+      "400g":
+        rmem_max: 2147483647
+        wmem_max: 2147483647
+        tcp_rmem: "4096 87380 2147483647"
+        tcp_wmem: "4096 65536 2147483647"
+        netdev_max_backlog: 1000000
+        netdev_budget: 2400
+        optmem_max: 268435456
+        somaxconn: 65535
+        mtu: 9000
+        ring_buffer: 65536
+
+  tasks:
+    # ============================================================
+    # Prerequisites
+    # ============================================================
+    - name: Check OS family
+      ansible.builtin.debug:
+        msg: "Installing on {{ ansible_os_family }} ({{ ansible_distribution }})"
+      tags: always
+
+    - name: Install prerequisites (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+          - build-essential
+          - pkg-config
+          - libssl-dev
+          - ethtool
+          - iperf3
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+      tags: install
+
+    - name: Install prerequisites (RHEL/CentOS)
+      ansible.builtin.yum:
+        name:
+          - curl
+          - ca-certificates
+          - gcc
+          - gcc-c++
+          - make
+          - openssl-devel
+          - pkgconfig
+          - ethtool
+          - iperf3
+        state: present
+      when: ansible_os_family == "RedHat"
+      tags: install
+
+    # ============================================================
+    # Rust Installation (for building from source)
+    # ============================================================
+    - name: Check if Rust is installed
+      ansible.builtin.command: rustc --version
+      register: rust_check
+      ignore_errors: true
+      changed_when: false
+      when: smartcopy_build_from_source
+      tags: install
+
+    - name: Install Rust via rustup
+      ansible.builtin.shell: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      args:
+        creates: "{{ ansible_env.HOME }}/.cargo/bin/rustc"
+      when:
+        - smartcopy_build_from_source
+        - rust_check.rc != 0
+      become: false
+      tags: install
+
+    # ============================================================
+    # User and Directory Setup
+    # ============================================================
+    - name: Create smartcopy group
+      ansible.builtin.group:
+        name: "{{ smartcopy_group }}"
+        state: present
+      tags: install
+
+    - name: Create smartcopy user
+      ansible.builtin.user:
+        name: "{{ smartcopy_user }}"
+        group: "{{ smartcopy_group }}"
+        system: true
+        shell: /sbin/nologin
+        home: "{{ smartcopy_data_dir }}"
+        create_home: false
+      tags: install
+
+    - name: Create directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ smartcopy_user }}"
+        group: "{{ smartcopy_group }}"
+        mode: "0755"
+      loop:
+        - "{{ smartcopy_config_dir }}"
+        - "{{ smartcopy_data_dir }}"
+        - "{{ smartcopy_log_dir }}"
+        - "{{ smartcopy_data_dir }}/certs"
+      tags: install
+
+    # ============================================================
+    # SmartCopy Installation
+    # ============================================================
+    - name: Clone SmartCopy repository (build from source)
+      ansible.builtin.git:
+        repo: "https://github.com/smartcopy/smartcopy.git"
+        dest: "{{ smartcopy_source_dir }}"
+        version: "{{ smartcopy_version if smartcopy_version != 'latest' else 'main' }}"
+      when: smartcopy_build_from_source
+      tags: install
+
+    - name: Build SmartCopy from source
+      ansible.builtin.shell: |
+        source {{ ansible_env.HOME }}/.cargo/env
+        cargo build --release
+      args:
+        chdir: "{{ smartcopy_source_dir }}"
+        creates: "{{ smartcopy_source_dir }}/target/release/smartcopy"
+      when: smartcopy_build_from_source
+      become: false
+      tags: install
+
+    - name: Install SmartCopy binary (from source)
+      ansible.builtin.copy:
+        src: "{{ smartcopy_source_dir }}/target/release/smartcopy"
+        dest: "{{ smartcopy_install_dir }}/smartcopy"
+        mode: "0755"
+        remote_src: true
+      when: smartcopy_build_from_source
+      notify: Restart smartcopy-agent
+      tags: install
+
+    - name: Download pre-built SmartCopy binary
+      ansible.builtin.get_url:
+        url: "https://github.com/smartcopy/smartcopy/releases/download/{{ smartcopy_version }}/smartcopy-{{ ansible_system | lower }}-{{ ansible_architecture }}"
+        dest: "{{ smartcopy_install_dir }}/smartcopy"
+        mode: "0755"
+      when: not smartcopy_build_from_source
+      notify: Restart smartcopy-agent
+      tags: install
+
+    - name: Verify SmartCopy installation
+      ansible.builtin.command: "{{ smartcopy_install_dir }}/smartcopy --version"
+      register: smartcopy_version_check
+      changed_when: false
+      tags: install
+
+    - name: Display SmartCopy version
+      ansible.builtin.debug:
+        msg: "SmartCopy installed: {{ smartcopy_version_check.stdout }}"
+      tags: install
+
+    # ============================================================
+    # Configuration
+    # ============================================================
+    - name: Create agent configuration file
+      ansible.builtin.template:
+        src: smartcopy-agent.conf.j2
+        dest: "{{ smartcopy_config_dir }}/agent.conf"
+        owner: "{{ smartcopy_user }}"
+        group: "{{ smartcopy_group }}"
+        mode: "0644"
+      notify: Restart smartcopy-agent
+      tags: configure
+
+    - name: Create environment file
+      ansible.builtin.template:
+        src: smartcopy.env.j2
+        dest: "{{ smartcopy_config_dir }}/smartcopy.env"
+        owner: "{{ smartcopy_user }}"
+        group: "{{ smartcopy_group }}"
+        mode: "0644"
+      notify: Restart smartcopy-agent
+      tags: configure
+
+    # ============================================================
+    # Kernel Tuning
+    # ============================================================
+    - name: Apply kernel tuning for high-speed networks
+      ansible.builtin.template:
+        src: 99-smartcopy.conf.j2
+        dest: /etc/sysctl.d/99-smartcopy.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: smartcopy_apply_kernel_tuning
+      notify: Apply sysctl settings
+      tags: tuning
+
+    - name: Configure network interface MTU
+      ansible.builtin.shell: |
+        ip link set {{ item }} mtu {{ network_tuning[smartcopy_network_speed].mtu }}
+      loop: "{{ ansible_interfaces | select('match', '^(eth|ens|enp|eno)') | list }}"
+      when:
+        - smartcopy_apply_kernel_tuning
+        - item != 'lo'
+      ignore_errors: true
+      changed_when: false
+      tags: tuning
+
+    - name: Configure ring buffer size
+      ansible.builtin.shell: |
+        ethtool -G {{ item }} rx {{ network_tuning[smartcopy_network_speed].ring_buffer }} tx {{ network_tuning[smartcopy_network_speed].ring_buffer }} 2>/dev/null || true
+      loop: "{{ ansible_interfaces | select('match', '^(eth|ens|enp|eno)') | list }}"
+      when:
+        - smartcopy_apply_kernel_tuning
+        - item != 'lo'
+      ignore_errors: true
+      changed_when: false
+      tags: tuning
+
+    # ============================================================
+    # Systemd Services
+    # ============================================================
+    - name: Create smartcopy-agent systemd service
+      ansible.builtin.template:
+        src: smartcopy-agent.service.j2
+        dest: /etc/systemd/system/smartcopy-agent.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart smartcopy-agent
+      tags: service
+
+    - name: Create smartcopy-quic systemd service
+      ansible.builtin.template:
+        src: smartcopy-quic.service.j2
+        dest: /etc/systemd/system/smartcopy-quic.service
+        owner: root
+        group: root
+        mode: "0644"
+      when: smartcopy_quic_enabled
+      notify:
+        - Reload systemd
+        - Restart smartcopy-quic
+      tags:
+        - service
+        - quic
+
+    - name: Enable and start smartcopy-agent service
+      ansible.builtin.systemd:
+        name: smartcopy-agent
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: smartcopy_enable_service
+      tags: service
+
+    - name: Enable and start smartcopy-quic service
+      ansible.builtin.systemd:
+        name: smartcopy-quic
+        enabled: true
+        state: started
+        daemon_reload: true
+      when:
+        - smartcopy_quic_enabled
+        - smartcopy_enable_service
+      tags:
+        - service
+        - quic
+
+    # ============================================================
+    # Firewall Configuration
+    # ============================================================
+    - name: Configure firewall (firewalld)
+      ansible.posix.firewalld:
+        port: "{{ item }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - "{{ smartcopy_agent_port }}"
+        - "{{ smartcopy_quic_port }}"
+      when:
+        - ansible_os_family == "RedHat"
+        - smartcopy_agent_protocol == "tcp" or smartcopy_quic_enabled
+      ignore_errors: true
+      tags: configure
+
+    - name: Configure firewall (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "{{ smartcopy_agent_port }}"
+        - "{{ smartcopy_quic_port }}"
+      when:
+        - ansible_os_family == "Debian"
+        - smartcopy_agent_protocol == "tcp" or smartcopy_quic_enabled
+      ignore_errors: true
+      tags: configure
+
+    # ============================================================
+    # Verification
+    # ============================================================
+    - name: Wait for agent to be ready
+      ansible.builtin.wait_for:
+        port: "{{ smartcopy_agent_port }}"
+        timeout: 30
+      when:
+        - smartcopy_enable_service
+        - smartcopy_agent_protocol == "tcp"
+      tags: service
+
+    - name: Check agent status
+      ansible.builtin.command: systemctl status smartcopy-agent
+      register: agent_status
+      changed_when: false
+      when: smartcopy_enable_service
+      tags: service
+
+    - name: Display agent status
+      ansible.builtin.debug:
+        msg: "{{ agent_status.stdout_lines }}"
+      when: smartcopy_enable_service
+      tags: service
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart smartcopy-agent
+      ansible.builtin.systemd:
+        name: smartcopy-agent
+        state: restarted
+      when: smartcopy_enable_service
+
+    - name: Restart smartcopy-quic
+      ansible.builtin.systemd:
+        name: smartcopy-quic
+        state: restarted
+      when:
+        - smartcopy_quic_enabled
+        - smartcopy_enable_service
+
+    - name: Apply sysctl settings
+      ansible.builtin.command: sysctl --system
