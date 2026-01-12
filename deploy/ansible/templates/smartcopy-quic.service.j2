@@ -1,0 +1,39 @@
+[Unit]
+Description=SmartCopy QUIC Server - High-Performance File Transfer
+Documentation=https://github.com/smartcopy/smartcopy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ smartcopy_user }}
+Group={{ smartcopy_group }}
+EnvironmentFile=-{{ smartcopy_config_dir }}/smartcopy.env
+ExecStart={{ smartcopy_install_dir }}/smartcopy quic-server \
+    --port {{ smartcopy_quic_port }} \
+    --bind {{ smartcopy_quic_bind }}
+
+Restart=always
+RestartSec=5
+StandardOutput=append:{{ smartcopy_log_dir }}/quic.log
+StandardError=append:{{ smartcopy_log_dir }}/quic.error.log
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths={{ smartcopy_data_dir }} {{ smartcopy_log_dir }}
+
+# Resource limits
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+
+# Performance tuning
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=0
+
+[Install]
+WantedBy=multi-user.target

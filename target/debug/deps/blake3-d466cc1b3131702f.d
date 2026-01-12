@@ -1,0 +1,12 @@
+/Users/gustcol/Pessoal/myenv/smartcopy/target/debug/deps/blake3-d466cc1b3131702f.d: /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/lib.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/guts.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/hazmat.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/platform.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/ffi_neon.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/portable.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/io.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/join.rs
+
+/Users/gustcol/Pessoal/myenv/smartcopy/target/debug/deps/libblake3-d466cc1b3131702f.rmeta: /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/lib.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/guts.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/hazmat.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/platform.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/ffi_neon.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/portable.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/io.rs /Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/join.rs
+
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/lib.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/guts.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/hazmat.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/platform.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/ffi_neon.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/portable.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/io.rs:
+/Users/gustcol/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.2/src/join.rs:

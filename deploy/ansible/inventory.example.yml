@@ -1,0 +1,57 @@
+# SmartCopy Agent Inventory Example
+# Copy this file to inventory.yml and customize for your environment
+
+all:
+  vars:
+    # SmartCopy version to install
+    smartcopy_version: "latest"
+
+    # Installation directory
+    smartcopy_install_dir: "/usr/local/bin"
+
+    # Agent configuration
+    smartcopy_agent_protocol: "tcp"  # stdio or tcp
+    smartcopy_agent_port: 9878
+    smartcopy_agent_bind: "0.0.0.0"
+
+    # QUIC server configuration (optional)
+    smartcopy_quic_enabled: false
+    smartcopy_quic_port: 9877
+
+    # Network speed tier for tuning (10g, 100g, 200g, 400g)
+    smartcopy_network_speed: "10g"
+
+    # Enable systemd service
+    smartcopy_enable_service: true
+
+    # Apply kernel tuning
+    smartcopy_apply_kernel_tuning: true
+
+  children:
+    # SmartCopy agent servers
+    smartcopy_agents:
+      hosts:
+        server1.example.com:
+          ansible_host: 192.168.1.10
+          ansible_user: admin
+          smartcopy_network_speed: "100g"
+
+        server2.example.com:
+          ansible_host: 192.168.1.11
+          ansible_user: admin
+          smartcopy_network_speed: "10g"
+
+    # QUIC servers (high-performance transfer nodes)
+    smartcopy_quic_servers:
+      hosts:
+        quic1.example.com:
+          ansible_host: 192.168.1.20
+          ansible_user: admin
+          smartcopy_quic_enabled: true
+          smartcopy_network_speed: "100g"
+
+    # All HPC nodes
+    hpc_nodes:
+      children:
+        smartcopy_agents:
+        smartcopy_quic_servers:
