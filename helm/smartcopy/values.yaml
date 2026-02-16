@@ -1,0 +1,77 @@
+# Default values for SmartCopy
+replicaCount: 1
+
+image:
+  repository: ghcr.io/smartcopy/smartcopy
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 9876
+  quicPort: 9877
+  metricsPort: 9090
+
+# Agent DaemonSet settings
+agent:
+  enabled: true
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+
+# Server Deployment settings
+server:
+  enabled: true
+  resources:
+    limits:
+      cpu: "2"
+      memory: 4Gi
+    requests:
+      cpu: "500m"
+      memory: 1Gi
+
+config:
+  threads: 0
+  bufferSize: "4M"
+  compress: true
+  verify: "xxhash3"
+  logLevel: "info"
+
+persistence:
+  enabled: false
+  storageClass: ""
+  size: 10Gi
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: metrics
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: metrics
+  initialDelaySeconds: 5
+  periodSeconds: 10

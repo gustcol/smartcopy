@@ -11,6 +11,9 @@ mod delta;
 mod manifest;
 mod resume;
 
+#[cfg(feature = "parquet_manifest")]
+pub mod parquet_manifest;
+
 pub use incremental::*;
 pub use delta::*;
 pub use manifest::*;

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "smartcopy.fullname" . }}-config
+  labels:
+    {{- include "smartcopy.labels" . | nindent 4 }}
+data:
+  SMARTCOPY_THREADS: {{ .Values.config.threads | quote }}
+  SMARTCOPY_BUFFER_SIZE: {{ .Values.config.bufferSize | quote }}
+  SMARTCOPY_COMPRESS: {{ .Values.config.compress | quote }}
+  SMARTCOPY_VERIFY: {{ .Values.config.verify | quote }}
+  RUST_LOG: {{ .Values.config.logLevel | quote }}

@@ -1,0 +1,28 @@
+{{- if .Values.server.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "smartcopy.fullname" . }}
+  labels:
+    {{- include "smartcopy.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: tcp
+      protocol: TCP
+      name: tcp
+    - port: {{ .Values.service.quicPort }}
+      targetPort: quic
+      protocol: UDP
+      name: quic
+    {{- if .Values.metrics.enabled }}
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
+  selector:
+    {{- include "smartcopy.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+{{- end }}

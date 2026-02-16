@@ -112,6 +112,23 @@ governor = "0.6"
 # NUMA support (optional, only for advanced NUMA features)
 hwloc2 = { version = "2.2", optional = true }
 
+# High-performance allocator
+mimalloc = "0.1"
+
+# Parquet manifest support (optional)
+arrow = { version = "53", optional = true }
+parquet = { version = "53", optional = true, features = ["zstd"] }
+
+# TAR batch streaming (optional)
+tar = { version = "0.4", optional = true }
+
+# TUI dashboard (optional)
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+# CPU affinity (optional)
+core_affinity = { version = "0.8", optional = true }
+
 # Platform-specific optimizations
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["fs", "net", "process", "socket"] }
@@ -150,8 +167,11 @@ lto = "thin"
 default = ["ssh", "compression"]
 ssh = []
 compression = []
-numa = ["hwloc2"]
+numa = ["hwloc2", "core_affinity"]
 io_uring = []
 quic = []
 agent = []
 encryption = ["aes-gcm", "chacha20poly1305", "argon2", "scrypt", "pbkdf2", "rand"]
+parquet_manifest = ["dep:arrow", "dep:parquet"]
+batch = ["dep:tar"]
+tui = ["dep:ratatui", "dep:crossterm"]

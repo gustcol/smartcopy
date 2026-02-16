@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  smartcopy-agent:
+    build: .
+    container_name: smartcopy-agent
+    command: ["agent", "--protocol", "tcp", "--port", "9878", "--bind", "0.0.0.0"]
+    ports:
+      - "9878:9878"
+      - "9876:9876"
+      - "9877:9877/udp"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    networks:
+      - smartcopy-net
+
+  dashboard:
+    build: ./dashboard
+    container_name: smartcopy-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://smartcopy-agent:9878
+    depends_on:
+      - smartcopy-agent
+    restart: unless-stopped
+    networks:
+      - smartcopy-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: smartcopy-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    networks:
+      - smartcopy-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: smartcopy-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=smartcopy
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - smartcopy-net
+
+networks:
+  smartcopy-net:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

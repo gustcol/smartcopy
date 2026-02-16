@@ -31,7 +31,7 @@ SmartCopy is a blazingly fast, intelligent file copy utility designed for High-P
 - **Streaming Verification**: Single-pass copy-and-hash for efficiency
 - **Incremental Sync**: Only copy new or changed files based on mtime/size
 - **Delta Transfer**: rsync-like rolling checksum for block-level change detection
-- **Manifest Tracking**: JSON/binary persistent state for efficient re-sync
+- **Manifest Tracking**: JSON/binary/Parquet persistent state for efficient re-sync
 
 ### Network Transfer
 
@@ -104,21 +104,27 @@ cargo build --release --features "encryption,numa,quic"
 | `ssh` | SSH/SFTP remote transfers | ssh2 | ✅ Yes |
 | `compression` | LZ4 compression | lz4_flex | ✅ Yes |
 | `encryption` | File encryption (AES, ChaCha20) | aes-gcm, chacha20poly1305, argon2 | ❌ No |
-| `numa` | NUMA topology awareness | hwloc2 | ❌ No |
+| `numa` | NUMA topology + CPU affinity | hwloc2, core_affinity | ❌ No |
 | `quic` | QUIC/HTTP3 transport | quinn, rustls | ❌ No |
 | `io_uring` | Linux io_uring async I/O | io-uring | ❌ No |
+| `parquet_manifest` | Parquet manifest format (Arrow/ZSTD) | arrow, parquet | ❌ No |
+| `batch` | TAR batch streaming for small files | tar | ❌ No |
+| `tui` | Terminal UI dashboard (Ratatui) | ratatui, crossterm | ❌ No |
 
 **Feature Combinations:**
 
 ```bash
-# HPC cluster with encryption
+# HPC cluster with encryption and CPU pinning
 cargo build --release --features "encryption,numa"
 
-# High-speed network transfers
-cargo build --release --features "quic,compression"
+# High-speed network transfers with batch streaming
+cargo build --release --features "quic,compression,batch"
 
-# Maximum performance on Linux
-cargo build --release --features "io_uring,numa"
+# Maximum performance on Linux with Parquet manifests
+cargo build --release --features "io_uring,numa,parquet_manifest"
+
+# Full-featured with TUI dashboard
+cargo build --release --features "tui,parquet_manifest,batch,numa"
 ```
 
 ## Quick Start
@@ -476,6 +482,11 @@ OPTIONS:
         --quic-port <PORT>      QUIC server port (default: 4433)
         --control-master        Enable SSH ControlMaster multiplexing
         --ssh-cipher <CIPHER>   SSH cipher: chacha20-poly1305, aes128-gcm, aes256-gcm
+        --manifest-format <FMT> Manifest format: json (default), parquet
+        --batch                 Enable TAR batch streaming for small files
+        --batch-size-mb <MB>    Maximum batch size in MB (default: 64)
+        --pin-cores             Pin worker threads to CPU cores (requires numa)
+        --tui                   Enable TUI dashboard (requires tui feature)
     -h, --help                  Print help
     -V, --version               Print version
 ```
@@ -1677,6 +1688,7 @@ smartcopy/
 │   │   ├── tcp.rs        # Direct TCP transfers
 │   │   ├── quic.rs       # QUIC/HTTP3 transport
 │   │   ├── agent.rs      # Remote agent protocol
+│   │   ├── batch.rs      # TAR batch streaming (feature: batch)
 │   │   └── parallel_sync.rs  # Connection pool & parallel sync
 │   ├── storage/          # Object storage
 │   │   ├── s3.rs         # S3-compatible storage
@@ -1684,14 +1696,17 @@ smartcopy/
 │   ├── sync/             # Incremental & delta sync
 │   │   ├── incremental.rs # Metadata-based sync
 │   │   ├── delta.rs      # Block-level delta transfer
-│   │   ├── manifest.rs   # State persistence
+│   │   ├── manifest.rs   # State persistence (JSON/binary)
+│   │   ├── parquet_manifest.rs # Parquet manifest (feature: parquet_manifest)
 │   │   └── resume.rs     # Resume interrupted transfers
 │   ├── system/           # Resource detection & tuning
 │   │   ├── resources.rs  # System resource detection
 │   │   ├── tuning.rs     # Performance recommendations
-│   │   ├── numa.rs       # NUMA topology & affinity
+│   │   ├── numa.rs       # NUMA topology, affinity & CPU pinning
 │   │   └── hpc.rs        # Slurm/PBS/LSF integration
 │   ├── progress/         # Progress reporting
+│   │   ├── reporter.rs   # indicatif progress bars
+│   │   └── tui.rs        # Ratatui TUI dashboard (feature: tui)
 │   └── api/              # REST API server
 │       ├── server.rs     # HTTP server with Tokio
 │       ├── handlers.rs   # Request handlers
@@ -1706,7 +1721,19 @@ smartcopy/
 │   ├── Dockerfile        # Multi-stage Docker build
 │   ├── nginx.conf        # Reverse proxy config
 │   └── docker-compose.yml
-└── deploy/               # Deployment scripts & Ansible
+├── deploy/               # Deployment scripts & Ansible
+│   ├── ansible/          # Ansible playbooks
+│   ├── prometheus.yml    # Prometheus scrape config
+│   └── install.sh        # Quick install script
+├── helm/                 # Kubernetes Helm charts
+│   └── smartcopy/
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/    # K8s manifests (Deployment, DaemonSet, Service, ConfigMap)
+├── .devcontainer/        # VS Code dev container
+├── Dockerfile            # Multi-stage production build
+├── Makefile              # Build automation
+└── docker-compose.yml    # Full stack (agent + dashboard + monitoring)
 ```
 
 ## Benchmarks
@@ -1864,6 +1891,16 @@ arquivo_ção_émíle.txt  ✓
 
 ### New in This Version
 
+- **MiMalloc Global Allocator**: ~10-15% allocation throughput improvement via Microsoft's MiMalloc
+- **Parquet Manifest Support** (`--manifest-format parquet`): Apache Arrow columnar format with ZSTD compression for million-file manifests
+- **TAR Batch Streaming** (`--batch`): Batches small files into TAR archives for dramatically reduced per-file overhead
+- **CPU Affinity Pinning** (`--pin-cores`): cgroup-aware worker thread pinning for maximum cache locality
+- **TUI Dashboard** (`--tui`): Ratatui terminal dashboard with progress gauge, throughput sparkline, and key bindings
+- **Multi-stage Dockerfile**: Production Docker image with BuildKit cache mounts and non-root user
+- **Makefile**: Build automation with Docker, test, clippy, release, and multi-arch targets
+- **Helm Charts**: Kubernetes Deployment, DaemonSet, Service, and ConfigMap for cluster deployments
+- **docker-compose.yml**: Full monitoring stack with Prometheus and Grafana
+- **DevContainer**: VS Code development container with full Rust toolchain
 - **Sparse File Support**: Automatic detection and preservation of sparse files (VM images, databases)
 - **Resume Interrupted Transfers**: Checkpoint-based resume for interrupted transfers
 - **Bandwidth Scheduling**: Time-based bandwidth limits (business hours, night windows)
@@ -1915,6 +1952,22 @@ arquivo_ção_émíle.txt  ✓
 - [x] ~~S3/Object storage support~~ **DONE** (with s5cmd integration)
 - [x] ~~Encryption at rest~~ **DONE**
 - [x] ~~Windows ACL support~~ **DONE**
+- [x] ~~MiMalloc global allocator~~ **DONE**
+- [x] ~~Parquet manifest format~~ **DONE** (Arrow columnar + ZSTD)
+- [x] ~~TAR batch streaming for small files~~ **DONE**
+- [x] ~~CPU affinity core pinning~~ **DONE** (cgroup-aware)
+- [x] ~~TUI terminal dashboard~~ **DONE** (Ratatui)
+- [x] ~~Dockerfile + Makefile~~ **DONE** (multi-stage, BuildKit)
+- [x] ~~Helm charts for Kubernetes~~ **DONE**
+- [x] ~~DevContainer for VS Code~~ **DONE**
+- [x] ~~docker-compose with monitoring stack~~ **DONE** (Prometheus + Grafana)
+- [ ] Deduplication (content-addressable storage)
+- [ ] Rsync protocol compatibility mode
+- [ ] WebDAV support
+- [ ] RDMA/InfiniBand transport
+- [ ] GPU-accelerated hashing (CUDA/OpenCL)
+- [ ] Filesystem change notifications (inotify/FSEvents)
+- [ ] Plugin system for custom transfer protocols
 
 ## Contributing
 

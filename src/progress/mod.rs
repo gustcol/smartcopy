@@ -5,4 +5,7 @@
 
 mod reporter;
 
+#[cfg(feature = "tui")]
+pub mod tui;
+
 pub use reporter::*;
