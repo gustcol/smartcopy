@@ -548,6 +548,18 @@ impl FileCopier {
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
 
+        // RAII wrapper for aligned buffer to prevent memory leaks on panic
+        struct AlignedBuffer {
+            ptr: *mut u8,
+            layout: std::alloc::Layout,
+        }
+
+        impl Drop for AlignedBuffer {
+            fn drop(&mut self) {
+                unsafe { std::alloc::dealloc(self.ptr, self.layout); }
+            }
+        }
+
         // Allocate aligned buffer
         let layout = std::alloc::Layout::from_size_align(BUFFER_SIZE, ALIGNMENT)
             .map_err(|_| SmartCopyError::IoError {
@@ -555,7 +567,7 @@ impl FileCopier {
                 message: "Failed to create aligned buffer layout".to_string(),
             })?;
 
-        let buffer = unsafe {
+        let aligned_buf = unsafe {
             let ptr = std::alloc::alloc(layout);
             if ptr.is_null() {
                 return Err(SmartCopyError::IoError {
@@ -563,7 +575,11 @@ impl FileCopier {
                     message: "Failed to allocate aligned buffer".to_string(),
                 });
             }
-            std::slice::from_raw_parts_mut(ptr, BUFFER_SIZE)
+            AlignedBuffer { ptr, layout }
+        };
+
+        let buffer = unsafe {
+            std::slice::from_raw_parts_mut(aligned_buf.ptr, BUFFER_SIZE)
         };
 
         let mut total_copied = 0u64;
@@ -576,11 +592,8 @@ impl FileCopier {
             };
 
             if bytes_read < 0 {
-                // Cleanup and return error
-                unsafe {
-                    std::alloc::dealloc(buffer.as_mut_ptr(), layout);
-                }
                 let err = std::io::Error::last_os_error();
+                drop(aligned_buf);
                 return Err(SmartCopyError::io(source, err));
             }
 
@@ -597,10 +610,8 @@ impl FileCopier {
             };
 
             if bytes_written < 0 {
-                unsafe {
-                    std::alloc::dealloc(buffer.as_mut_ptr(), layout);
-                }
                 let err = std::io::Error::last_os_error();
+                drop(aligned_buf);
                 return Err(SmartCopyError::io(dest, err));
             }
 
@@ -608,10 +619,8 @@ impl FileCopier {
             total_copied += bytes_read as u64;
         }
 
-        // Cleanup aligned buffer
-        unsafe {
-            std::alloc::dealloc(buffer.as_mut_ptr(), layout);
-        }
+        // AlignedBuffer dropped automatically here via RAII
+        drop(aligned_buf);
 
         // Truncate to exact size if needed (in case of alignment padding)
         if total_copied != size {

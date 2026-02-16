@@ -333,9 +333,7 @@ impl ParallelRemoteSync {
         let mut ops = Vec::new();
 
         for file in files {
-            let rel_path = file.path.strip_prefix(&file.path.parent().unwrap_or(&file.path))
-                .unwrap_or(&file.path);
-            let dest = remote_base.join(rel_path);
+            let dest = remote_base.join(&file.relative_path);
 
             if file.size >= self.config.min_chunked_size {
                 // Split large file into chunks

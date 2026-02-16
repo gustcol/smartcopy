@@ -312,6 +312,9 @@ impl TcpClient {
                 }
 
                 file_writer.flush()?;
+                // Ensure data is persisted to disk
+                file_writer.get_ref().sync_all()
+                    .map_err(|e| SmartCopyError::io(local_path, e))?;
 
                 // Read complete message
                 reader.read_exact(&mut msg_type)?;
