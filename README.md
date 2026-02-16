@@ -962,6 +962,231 @@ iperf3 -c agent-host -P 16 -t 60
 
 For detailed deployment documentation, see [deploy/README.md](deploy/README.md).
 
+## Docker Deployment
+
+SmartCopy provides a multi-stage Docker image optimized for production use with minimal footprint.
+
+### Building the Docker Image
+
+```bash
+# Build production image (all features enabled)
+docker build -t smartcopy:latest .
+
+# Build with BuildKit for faster caching (recommended)
+DOCKER_BUILDKIT=1 docker build -t smartcopy:latest .
+
+# Or use the Makefile
+make build
+```
+
+### Running with Docker
+
+```bash
+# Basic file copy between mounted volumes
+docker run --rm \
+  -v /source/path:/source:ro \
+  -v /dest/path:/dest \
+  smartcopy:latest copy /source /dest --verify xxhash3
+
+# Run as agent (daemon mode)
+docker run -d --name smartcopy-agent \
+  -p 9878:9878 -p 9877:9877/udp \
+  -v /data:/data \
+  smartcopy:latest agent --protocol tcp --port 9878 --bind 0.0.0.0
+
+# Run API server
+docker run -d --name smartcopy-api \
+  -p 9876:9876 \
+  -v /data:/data \
+  smartcopy:latest api-server --port 9876 --bind 0.0.0.0
+```
+
+### Full Stack with Docker Compose
+
+The included `docker-compose.yml` brings up the complete monitoring stack:
+
+```bash
+# Start all services (agent + dashboard + Prometheus + Grafana)
+docker-compose up -d
+
+# Check status
+docker-compose ps
+
+# View agent logs
+docker-compose logs -f smartcopy-agent
+
+# Stop all services
+docker-compose down
+```
+
+**Services included:**
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `smartcopy-agent` | 9878, 9877/udp | SmartCopy transfer agent (TCP + QUIC) |
+| `dashboard` | 3000 | React monitoring dashboard |
+| `prometheus` | 9090 | Metrics collection and alerting |
+| `grafana` | 3001 | Visualization dashboards (default password: `smartcopy`) |
+
+### Custom docker-compose Configuration
+
+```yaml
+# Override volumes for your environment
+services:
+  smartcopy-agent:
+    volumes:
+      - /mnt/storage:/data          # Primary storage
+      - /mnt/scratch:/scratch        # Scratch space
+    environment:
+      - SMARTCOPY_THREADS=16
+      - SMARTCOPY_BUFFER_SIZE=8M
+```
+
+## Kubernetes Deployment
+
+SmartCopy includes Helm charts for deploying on Kubernetes clusters, ideal for HPC and cloud-native environments.
+
+### Prerequisites
+
+- Kubernetes 1.24+
+- Helm 3.x
+- Persistent storage (optional, for transfer history)
+
+### Quick Install with Helm
+
+```bash
+# Add SmartCopy as a local chart
+helm install smartcopy ./helm/smartcopy
+
+# Install with custom values
+helm install smartcopy ./helm/smartcopy \
+  --set agent.resources.limits.cpu=8 \
+  --set agent.resources.limits.memory=16Gi \
+  --set config.threads=16 \
+  --set config.bufferSize="8M"
+
+# Install in a specific namespace
+helm install smartcopy ./helm/smartcopy \
+  --namespace data-transfer \
+  --create-namespace
+```
+
+### Architecture on Kubernetes
+
+SmartCopy deploys two main components:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                 Kubernetes Cluster                    │
+│                                                       │
+│  ┌─────────────────┐    ┌──────────────────────────┐ │
+│  │   Deployment     │    │      DaemonSet            │ │
+│  │   (API Server)   │    │   (Agent per Node)        │ │
+│  │                   │    │                            │ │
+│  │  ┌─────────────┐ │    │  ┌──────┐ ┌──────┐       │ │
+│  │  │ smartcopy   │ │    │  │agent │ │agent │ ...    │ │
+│  │  │ api-server  │ │    │  │node-1│ │node-2│       │ │
+│  │  └──────┬──────┘ │    │  └──┬───┘ └──┬───┘       │ │
+│  └─────────┼─────────┘    └─────┼────────┼───────────┘ │
+│            │                     │        │              │
+│  ┌─────────┴─────────────────────┴────────┴───────────┐ │
+│  │              Service (ClusterIP)                     │ │
+│  │         Port 9876 (API) / 9877 (QUIC)               │ │
+│  └──────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Deployment** (1 replica): Runs the API server for programmatic access and dashboard integration
+- **DaemonSet**: Runs a SmartCopy agent on every node, ensuring data locality for transfers
+
+### Customizing Values
+
+Create a `values-production.yaml` for your environment:
+
+```yaml
+# values-production.yaml
+image:
+  repository: your-registry.io/smartcopy
+  tag: "0.1.0"
+
+agent:
+  enabled: true
+  resources:
+    limits:
+      cpu: "8"
+      memory: 16Gi
+    requests:
+      cpu: "2"
+      memory: 4Gi
+
+server:
+  enabled: true
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+
+config:
+  threads: 16
+  bufferSize: "8M"
+  compress: true
+  verify: "blake3"
+  logLevel: "info"
+
+persistence:
+  enabled: true
+  storageClass: "fast-ssd"
+  size: 50Gi
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true  # Requires Prometheus Operator
+```
+
+```bash
+# Deploy with production values
+helm install smartcopy ./helm/smartcopy -f values-production.yaml
+
+# Upgrade existing deployment
+helm upgrade smartcopy ./helm/smartcopy -f values-production.yaml
+
+# Verify deployment
+kubectl get pods -l app.kubernetes.io/name=smartcopy
+kubectl get daemonset -l app.kubernetes.io/name=smartcopy
+```
+
+### Monitoring on Kubernetes
+
+If you have the Prometheus Operator installed:
+
+```yaml
+# Enable ServiceMonitor in values.yaml
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+```
+
+Otherwise, use the provided `deploy/prometheus.yml` scrape config with a standalone Prometheus instance.
+
+### Common Helm Operations
+
+```bash
+# Check chart before installing
+helm lint ./helm/smartcopy
+helm template smartcopy ./helm/smartcopy
+
+# List installed releases
+helm list -A
+
+# Rollback to previous version
+helm rollback smartcopy 1
+
+# Uninstall
+helm uninstall smartcopy
+```
+
 ## API Server
 
 SmartCopy includes a REST API server for programmatic access and dashboard integration:
