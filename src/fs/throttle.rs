@@ -31,7 +31,9 @@ impl BandwidthLimiter {
 
         let tokens_per_second = (bytes_per_second as usize / BYTES_PER_TOKEN).max(1);
 
-        let quota = Quota::per_second(NonZeroU32::new(tokens_per_second as u32).unwrap_or(NonZeroU32::MIN));
+        // Cap at u32::MAX to prevent overflow when casting
+        let capped_tokens = tokens_per_second.min(u32::MAX as usize) as u32;
+        let quota = Quota::per_second(NonZeroU32::new(capped_tokens).unwrap_or(NonZeroU32::MIN));
 
         let limiter = RateLimiter::direct(quota);
 
@@ -67,7 +69,7 @@ impl BandwidthLimiter {
 
     /// Wait until we're allowed to transfer the given number of bytes
     pub async fn wait_for_capacity(&self, bytes: usize) {
-        let tokens_needed = (bytes / self.bytes_per_token).max(1) as u32;
+        let tokens_needed = (bytes / self.bytes_per_token).max(1);
 
         // Request tokens - this will block until available
         for _ in 0..tokens_needed {
@@ -77,7 +79,7 @@ impl BandwidthLimiter {
 
     /// Wait (blocking) until we're allowed to transfer the given number of bytes
     pub fn wait_for_capacity_blocking(&self, bytes: usize) {
-        let tokens_needed = (bytes / self.bytes_per_token).max(1) as u32;
+        let tokens_needed = (bytes / self.bytes_per_token).max(1);
 
         for _ in 0..tokens_needed {
             // Spin-wait for capacity

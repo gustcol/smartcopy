@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Node.js (dashboard)
+dashboard/node_modules/
+dashboard/dist/
+
+# Claude Code local files
+.claude/*.local.md
+
+# Debug/profiling
+*.dSYM/
+perf.data
+flamegraph.svg

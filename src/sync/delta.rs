@@ -160,30 +160,37 @@ impl FileSignature {
         let num_chunks = ((file_size as usize) + chunk_size - 1) / chunk_size;
 
         // Calculate chunks in parallel
-        let chunks: Vec<_> = (0..num_chunks)
+        let chunk_results: Vec<Result<ChunkSignature>> = (0..num_chunks)
             .into_par_iter()
             .map(|index| {
                 let offset = (index * chunk_size) as u64;
-                let mut file = File::open(path).unwrap();
-                file.seek(SeekFrom::Start(offset)).unwrap();
+                let mut file = File::open(path).with_path(path)?;
+                file.seek(SeekFrom::Start(offset))
+                    .map_err(|e| SmartCopyError::io(path, e))?;
 
                 let remaining = file_size - offset;
                 let size = chunk_size.min(remaining as usize);
                 let mut buffer = vec![0u8; size];
-                file.read_exact(&mut buffer).unwrap();
+                file.read_exact(&mut buffer)
+                    .map_err(|e| SmartCopyError::io(path, e))?;
 
                 let weak = RollingChecksum::calculate(&buffer);
                 let strong = strong_hash(&buffer);
 
-                ChunkSignature {
+                Ok(ChunkSignature {
                     index,
                     offset,
                     size,
                     weak_checksum: weak.value(),
                     strong_hash: strong,
-                }
+                })
             })
             .collect();
+
+        // Collect results, propagating any errors
+        let chunks: Vec<ChunkSignature> = chunk_results
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(FileSignature {
             path: path.to_string_lossy().to_string(),

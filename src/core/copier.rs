@@ -252,7 +252,11 @@ impl CopyEngine {
 
                     if let Some(progress) = progress {
                         progress.increment_files(1);
-                        progress.increment_bytes(entry.size);
+                        let bytes = match &result {
+                            Ok((copied, _)) => *copied,
+                            Err(_) => 0,
+                        };
+                        progress.increment_bytes(bytes);
                     }
 
                     Some((entry.relative_path.to_string_lossy().to_string(), result))
@@ -323,7 +327,6 @@ impl CopyEngine {
         let size_category = FileSizeCategory::from_size(entry.size);
 
         // For HUGE files (>=1GB), use parallel chunked copy for maximum performance
-        // NOW WORKS WITH VERIFICATION! Hash is computed in parallel per chunk
         if size_category.use_parallel_chunks() {
             // Use parallel chunked copy - each chunk is copied by a separate thread
             // Chunk size of 64MB with workers = CPU cores for optimal I/O parallelism
@@ -331,22 +334,20 @@ impl CopyEngine {
             let workers = num_cpus::get().max(4);
             let chunked_copier = ChunkedCopier::new(chunk_size, workers);
 
-            let result = if verify_algo.is_some() {
-                // Use parallel copy WITH hash - maintains 6+ GB/s with verification
-                chunked_copier.copy_parallel_with_hash(&entry.path, &dest_path, true)?
-            } else {
-                chunked_copier.copy_parallel(&entry.path, &dest_path)?
-            };
+            let result = chunked_copier.copy_parallel(&entry.path, &dest_path)?;
 
             // Preserve attributes
             self.copier.preserve_attributes(&entry.path, &dest_path)?;
 
-            // Return hash result for verification if computed
-            let hash_result = result.hash.map(|h| crate::hash::HashResult {
-                algorithm: verify_algo.unwrap_or(crate::config::HashAlgorithm::XXHash3),
-                hash: format!("{:016x}", h),
-                size: result.bytes_copied,
-            });
+            // If verification is requested, compute a proper streaming hash of the
+            // source file. We can't use per-chunk composite hashes because they won't
+            // match the streaming hash that verify_copies() computes on the destination.
+            // XXHash3 runs at 30+ GB/s so the extra read is negligible.
+            let hash_result = if let Some(algo) = verify_algo {
+                Some(crate::hash::hash_file(&entry.path, algo)?)
+            } else {
+                None
+            };
 
             return Ok((result.bytes_copied, hash_result));
         }
