@@ -316,11 +316,17 @@ impl ScheduledLimiter {
         *last_update = now;
         drop(last_update);
 
-        // Add tokens based on elapsed time
+        // Add tokens based on elapsed time using atomic loop to avoid race conditions
         let new_tokens = (elapsed.as_secs_f64() * limit as f64) as u64;
-        let current_tokens = self.tokens.fetch_add(new_tokens, Ordering::Relaxed);
-        let total_tokens = (current_tokens + new_tokens).min(limit * 2); // Cap at 2 seconds worth
-        self.tokens.store(total_tokens, Ordering::Relaxed);
+        let cap = limit * 2; // Cap at 2 seconds worth
+        let total_tokens = loop {
+            let current = self.tokens.load(Ordering::Relaxed);
+            let desired = (current + new_tokens).min(cap);
+            match self.tokens.compare_exchange_weak(current, desired, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => break desired,
+                Err(_) => continue, // Retry on contention
+            }
+        };
 
         if total_tokens >= bytes {
             self.tokens.fetch_sub(bytes, Ordering::Relaxed);

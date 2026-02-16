@@ -440,12 +440,18 @@ impl JobScheduler {
     fn submit_slurm(&self, config: &JobConfig, smartcopy_args: &[&str]) -> io::Result<String> {
         let script = self.generate_slurm_script(config, smartcopy_args);
 
-        let output = Command::new("sbatch")
+        let mut child = Command::new("sbatch")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()?
-            .wait_with_output()?;
+            .spawn()?;
+
+        if let Some(ref mut stdin) = child.stdin {
+            use std::io::Write;
+            stdin.write_all(script.as_bytes())?;
+        }
+
+        let output = child.wait_with_output()?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -509,12 +515,18 @@ impl JobScheduler {
     fn submit_pbs(&self, config: &JobConfig, smartcopy_args: &[&str]) -> io::Result<String> {
         let script = self.generate_pbs_script(config, smartcopy_args);
 
-        let output = Command::new("qsub")
+        let mut child = Command::new("qsub")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()?
-            .wait_with_output()?;
+            .spawn()?;
+
+        if let Some(ref mut stdin) = child.stdin {
+            use std::io::Write;
+            stdin.write_all(script.as_bytes())?;
+        }
+
+        let output = child.wait_with_output()?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -607,12 +619,18 @@ impl JobScheduler {
     fn submit_sge(&self, config: &JobConfig, smartcopy_args: &[&str]) -> io::Result<String> {
         let script = self.generate_sge_script(config, smartcopy_args);
 
-        let output = Command::new("qsub")
+        let mut child = Command::new("qsub")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()?
-            .wait_with_output()?;
+            .spawn()?;
+
+        if let Some(ref mut stdin) = child.stdin {
+            use std::io::Write;
+            stdin.write_all(script.as_bytes())?;
+        }
+
+        let output = child.wait_with_output()?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
