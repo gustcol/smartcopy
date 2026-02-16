@@ -5,8 +5,7 @@
 //! `/data/project/src/b.rs` share the prefix nodes, reducing memory usage
 //! compared to a HashSet<String>.
 //!
-//! Ported from Andromeda's deduplication approach to give SmartCopy
-//! memory-efficient path storage for million-file manifests.
+//! Provides memory-efficient path storage for million-file manifests.
 
 use std::collections::HashMap;
 
