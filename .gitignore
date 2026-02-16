@@ -20,7 +20,7 @@
 dashboard/node_modules/
 dashboard/dist/
 
-# Claude Code local files
+# Local tool configuration
 .claude/*.local.md
 
 # Debug/profiling

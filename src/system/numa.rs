@@ -323,6 +323,103 @@ pub fn set_memory_policy_local() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Read the set of allowed CPUs from cgroup v2 (used in containers).
+///
+/// Parses `/proc/self/status` for `Cpus_allowed_list` to determine
+/// which CPUs are available to this process (important in containerized
+/// environments where cgroups restrict CPU access).
+#[cfg(target_os = "linux")]
+pub fn read_cgroup_allowed_cpus() -> Vec<usize> {
+    if let Ok(content) = std::fs::read_to_string("/proc/self/status") {
+        for line in content.lines() {
+            if line.starts_with("Cpus_allowed_list:") {
+                let list = line.trim_start_matches("Cpus_allowed_list:").trim();
+                return NumaTopology::parse_cpu_list(list);
+            }
+        }
+    }
+    // Fallback: all CPUs
+    (0..num_cpus::get()).collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn read_cgroup_allowed_cpus() -> Vec<usize> {
+    (0..num_cpus::get()).collect()
+}
+
+/// Manages pinning rayon worker threads to specific CPU cores for
+/// maximum cache locality and minimal cross-core traffic.
+pub struct WorkerPinner {
+    cpus: Vec<usize>,
+}
+
+impl WorkerPinner {
+    /// Create a pinner using cgroup-allowed CPUs.
+    pub fn from_allowed_cpus() -> Self {
+        Self {
+            cpus: read_cgroup_allowed_cpus(),
+        }
+    }
+
+    /// Create a pinner from a specific CPU list.
+    pub fn from_cpus(cpus: Vec<usize>) -> Self {
+        Self { cpus }
+    }
+
+    /// Create a pinner from NUMA topology with the given worker count.
+    pub fn from_topology(topology: &NumaTopology, num_workers: usize) -> Self {
+        Self {
+            cpus: topology.get_worker_cpus(num_workers),
+        }
+    }
+
+    /// Get the number of available CPUs.
+    pub fn num_cpus(&self) -> usize {
+        self.cpus.len()
+    }
+
+    /// Build a rayon thread pool with workers pinned to specific cores.
+    #[cfg(feature = "numa")]
+    pub fn build_pinned_pool(
+        &self,
+        num_threads: usize,
+    ) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+        let cpus = self.cpus.clone();
+        let effective_threads = num_threads.min(cpus.len());
+
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(effective_threads)
+            .start_handler(move |idx| {
+                if idx < cpus.len() {
+                    let cpu_id = cpus[idx];
+                    if let Some(core_ids) = core_affinity::get_core_ids() {
+                        if let Some(core_id) = core_ids.iter().find(|c| c.id == cpu_id) {
+                            core_affinity::set_for_current(*core_id);
+                        }
+                    }
+                }
+            })
+            .build()
+    }
+
+    /// Build a standard (unpinned) rayon thread pool as fallback.
+    #[cfg(not(feature = "numa"))]
+    pub fn build_pinned_pool(
+        &self,
+        num_threads: usize,
+    ) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads.min(self.cpus.len()))
+            .build()
+    }
+}
+
+/// Convenience function: pin workers to cores and return a rayon pool.
+pub fn pin_workers_to_cores(num_workers: usize) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    let pinner = WorkerPinner::from_allowed_cpus();
+    pinner.build_pinned_pool(num_workers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +445,33 @@ mod tests {
         let cpus = topology.get_worker_cpus(4);
         assert!(cpus.len() <= 4);
         assert!(!cpus.is_empty());
+    }
+
+    #[test]
+    fn test_cgroup_allowed_cpus() {
+        let cpus = read_cgroup_allowed_cpus();
+        assert!(!cpus.is_empty());
+    }
+
+    #[test]
+    fn test_worker_pinner_creation() {
+        let pinner = WorkerPinner::from_allowed_cpus();
+        assert!(pinner.num_cpus() > 0);
+    }
+
+    #[test]
+    fn test_worker_pinner_from_topology() {
+        let topology = NumaTopology::detect();
+        let pinner = WorkerPinner::from_topology(&topology, 4);
+        assert!(pinner.num_cpus() > 0);
+        assert!(pinner.num_cpus() <= 4);
+    }
+
+    #[test]
+    fn test_pin_workers_to_cores() {
+        let pool = pin_workers_to_cores(2);
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
+        assert!(pool.current_num_threads() > 0);
     }
 }
