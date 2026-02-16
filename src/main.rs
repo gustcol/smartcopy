@@ -2,6 +2,11 @@
 //!
 //! A blazingly fast, intelligent file copy utility for HPC environments.
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use clap::Parser;
 use smartcopy::config::{AgentProtocol, CliArgs, Commands, CopyConfig, HighSpeedTier, WorkloadType};
 use smartcopy::core::CopyEngine;
@@ -53,6 +58,14 @@ fn run(args: CliArgs) -> Result<()> {
     // Print configuration if verbose
     if args.verbose > 0 {
         print_config(&config);
+    }
+
+    // Launch TUI dashboard if requested
+    #[cfg(feature = "tui")]
+    if args.tui {
+        use smartcopy::progress::tui::TuiDashboard;
+        let dashboard = TuiDashboard::new();
+        let _tui_handle = dashboard.spawn();
     }
 
     // Create progress reporter

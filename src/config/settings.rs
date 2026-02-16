@@ -204,6 +204,26 @@ pub struct CliArgs {
     #[arg(long, value_name = "PATH")]
     pub log_file: Option<PathBuf>,
 
+    /// Manifest format (json or parquet)
+    #[arg(long, value_enum, default_value = "json")]
+    pub manifest_format: ManifestFormat,
+
+    /// Enable TAR batch streaming for small files
+    #[arg(long)]
+    pub batch: bool,
+
+    /// Maximum batch size in MB for TAR streaming
+    #[arg(long, default_value = "64", value_name = "MB")]
+    pub batch_size_mb: u64,
+
+    /// Pin worker threads to CPU cores (requires numa feature)
+    #[arg(long)]
+    pub pin_cores: bool,
+
+    /// Enable TUI dashboard (requires tui feature)
+    #[arg(long)]
+    pub tui: bool,
+
     /// Subcommands
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -386,6 +406,17 @@ pub enum OutputFormat {
     Json,
     /// CSV format
     Csv,
+}
+
+/// Manifest file format
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestFormat {
+    /// JSON format (default, human-readable)
+    #[default]
+    Json,
+    /// Parquet format (columnar, high-performance, requires parquet feature)
+    Parquet,
 }
 
 /// Workload type for tuning recommendations

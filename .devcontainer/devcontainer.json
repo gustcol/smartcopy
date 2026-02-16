@@ -1,0 +1,22 @@
+{
+    "name": "SmartCopy Dev",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml",
+                "vadimcn.vscode-lldb",
+                "serayuzgur.crates"
+            ],
+            "settings": {
+                "rust-analyzer.cargo.allFeatures": true,
+                "rust-analyzer.checkOnSave.command": "clippy"
+            }
+        }
+    },
+    "postCreateCommand": "cargo build --all-features",
+    "remoteUser": "vscode"
+}
