@@ -224,6 +224,18 @@ pub struct CliArgs {
     #[arg(long)]
     pub tui: bool,
 
+    /// Use native AWS SDK for S3 operations (requires native_s3 feature)
+    #[arg(long)]
+    pub native_s3: bool,
+
+    /// Maximum concurrent in-flight file operations (0 = auto: 2x CPU count)
+    #[arg(long, default_value = "0", value_name = "NUM")]
+    pub max_concurrent: usize,
+
+    /// Batch archive format (tar, tar-lz4, tar-zstd)
+    #[arg(long, default_value = "tar", value_name = "FORMAT")]
+    pub batch_format: String,
+
     /// Subcommands
     #[command(subcommand)]
     pub command: Option<Commands>,

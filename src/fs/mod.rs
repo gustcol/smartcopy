@@ -11,6 +11,7 @@ pub mod compress;
 pub mod sparse;
 pub mod scheduler;
 pub mod acl;
+pub mod patricia;
 
 pub use scanner::*;
 pub use operations::*;
