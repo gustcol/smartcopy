@@ -1842,6 +1842,26 @@ arquivo_ção_émíle.txt  ✓
 | prsync | Multi-host deployments | Overhead on single-host copies |
 | parallel+rsync | Large file counts | Complex setup, high overhead |
 
+### Bug Fixes
+
+- **Fixed hash verification for large files**: Parallel chunked copy (files >=1GB) was producing a composite XOR hash that could never match the streaming verification hash, causing all large file verifications to silently fail. Replaced with proper streaming hash computation after parallel copy.
+- **Fixed panic in parallel delta signature generation**: The delta sync module used `.unwrap()` inside parallel iterators when opening files for signature calculation. Any I/O error (permissions, missing files) would panic the entire thread pool instead of propagating the error.
+- **Fixed integer overflow in bandwidth limiter**: When configured with high bandwidth values (>4GB/s), the token-per-second calculation would overflow during `u32` cast, producing incorrect throttling behavior. Added proper capping before the conversion.
+- **Fixed progress tracking on failed tasks**: The scheduler's `bytes_remaining` counter was decremented even when tasks failed, causing the progress tracker to underflow on retries and report incorrect completion percentages.
+- **Fixed data durability in TCP downloads**: The direct TCP transfer module only called `flush()` after writing file data, without issuing `sync_all()`. This meant data could be lost on power failure since it was only guaranteed to reach the kernel buffer, not persistent storage.
+- **Fixed URL decoding for multi-byte UTF-8**: The API server's URL decoder was converting percent-encoded bytes directly to `char`, corrupting multi-byte UTF-8 characters (e.g., CJK, Cyrillic). Rewrote to collect raw bytes first, then decode as UTF-8.
+- **Fixed unbounded header reading in API server**: The HTTP request parser had no limit on the number or total size of headers, allowing a malicious client to exhaust server memory. Added a 100-header / 8KB total size limit.
+- **Fixed incremental mode progress reporting**: When files were skipped in incremental mode (destination already up-to-date), the progress bar still advanced by the full file size instead of 0, showing misleading completion percentages.
+- **Fixed memory safety in Direct I/O**: The aligned buffer for O_DIRECT operations used raw `alloc`/`dealloc` without RAII, meaning a panic between allocation and deallocation would leak memory. Wrapped in a struct with `Drop` implementation.
+- **Fixed HPC job submission (Slurm, PBS, SGE)**: All three job scheduler submission functions spawned the batch command with piped stdin but never wrote the generated script to it, causing every job submission to fail or hang.
+- **Fixed potential panic in QUIC metadata handler**: The `modified()` timestamp was unwrapped directly, which would panic on filesystems that don't support modification times. Replaced with safe fallback to epoch.
+- **Fixed silent data corruption in io_uring copy**: After an io_uring write operation, the code advanced the offset by `bytes_read` instead of verifying `bytes_written` matched. A short write would silently skip data. Added explicit short-write detection.
+- **Fixed remote sync flattening directory structure**: The parallel remote sync module was computing destination paths by stripping the file's parent directory instead of using the pre-computed relative path, causing all files to be transferred into a flat directory.
+- **Fixed job creation ignoring start_immediately flag**: The API job creation handler set `JobStatus::Pending` regardless of whether `start_immediately` was true. Jobs that requested immediate start now get `JobStatus::Running`.
+- **Fixed UUID generation producing predictable IDs**: The custom UUID generator used weak entropy (timestamp XOR process ID) and had missing version/variant bits. Improved entropy mixing and added proper UUID v4 format markers.
+- **Fixed division by zero in API pagination**: The `PaginatedResponse` constructor would panic if `per_page` was 0. Added a zero-check guard.
+- **Fixed race condition in bandwidth scheduler token bucket**: The token refill logic used non-atomic `fetch_add` + `store` sequence, allowing concurrent threads to corrupt the token count. Replaced with a proper compare-and-swap loop.
+
 ### New in This Version
 
 - **Sparse File Support**: Automatic detection and preservation of sparse files (VM images, databases)

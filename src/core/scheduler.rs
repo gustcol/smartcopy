@@ -249,10 +249,10 @@ impl TaskScheduler {
         if success {
             self.stats.tasks_completed.fetch_add(1, Ordering::Relaxed);
             self.stats.bytes_copied.fetch_add(bytes, Ordering::Relaxed);
+            self.stats.bytes_remaining.fetch_sub(bytes, Ordering::Relaxed);
         } else {
             self.stats.tasks_failed.fetch_add(1, Ordering::Relaxed);
         }
-        self.stats.bytes_remaining.fetch_sub(bytes, Ordering::Relaxed);
         self.stats.tasks_in_progress.fetch_sub(1, Ordering::Relaxed);
     }
 
