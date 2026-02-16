@@ -14,6 +14,23 @@ SmartCopy is a blazingly fast, intelligent file copy utility designed for High-P
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Practical Examples](#practical-examples)
+  - [Native: Local Backup](#example-1-local-backup-with-verification-native)
+  - [Native: NVMe-to-NVMe Transfer](#example-2-high-performance-nvme-to-nvme-transfer-native)
+  - [Native: Remote Sync Over SSH](#example-3-remote-sync-over-ssh-native)
+  - [Native: QUIC on 100G Networks](#example-4-quic-transfer-on-high-speed-networks-native)
+  - [Native: Small File Batch Streaming](#example-5-small-file-optimization-with-batch-streaming-native)
+  - [Native: Encrypted Backup](#example-6-encrypted-backup-to-external-storage-native)
+  - [Docker: One-Shot Copy](#example-7-docker----one-shot-file-copy-between-volumes)
+  - [Docker: Agent with Monitoring](#example-8-docker----persistent-agent-with-monitoring-stack)
+  - [Docker: CI/CD Pipeline](#example-9-docker----cicd-pipeline-artifact-copy)
+  - [Docker: Multi-Host Distribution](#example-10-docker----multi-host-data-distribution)
+  - [Kubernetes: Deploy and Transfer](#example-11-kubernetes----deploy-and-transfer-between-pods)
+  - [Kubernetes: Batch Migration Job](#example-12-kubernetes----batch-job-for-large-migration)
+  - [Kubernetes: CronJob Backups](#example-13-kubernetes----cronjob-for-scheduled-backups)
+  - [Kubernetes: Multi-Namespace with Monitoring](#example-14-kubernetes----multi-namespace-data-sync-with-monitoring)
+  - [Native: TUI Dashboard](#example-15-tui-dashboard-for-interactive-monitoring-native)
+  - [Native: Parquet Manifest](#example-16-parquet-manifest-for-large-scale-environments-native)
 - [Usage Scenarios & Flowcharts](#usage-scenarios--flowcharts)
 - [CLI Reference](#cli-reference)
 - [Advanced Remote Transfer](#advanced-remote-transfer)
@@ -223,6 +240,518 @@ smartcopy status /path/to/manifest.json
 ```bash
 # Run performance benchmark
 smartcopy benchmark /tmp/benchmark --size 1G
+```
+
+## Practical Examples
+
+This section provides end-to-end scenarios covering native, Docker, and Kubernetes deployments. Each example is self-contained and can be adapted to your environment.
+
+### Example 1: Local Backup with Verification (Native)
+
+Back up a dataset directory to an external drive, verify integrity with BLAKE3, and keep an incremental manifest so future runs only copy changes.
+
+```bash
+# First run: full copy with verification
+smartcopy /home/data /mnt/external/backup \
+  --verify blake3 \
+  --progress \
+  --threads 8
+
+# Subsequent runs: only copy new or modified files
+smartcopy /home/data /mnt/external/backup \
+  --incremental \
+  --verify blake3 \
+  --progress
+
+# Verify the backup at any time
+smartcopy verify /home/data /mnt/external/backup --algorithm blake3
+```
+
+### Example 2: High-Performance NVMe-to-NVMe Transfer (Native)
+
+Migrate 50 TB of genomics data between two NVMe arrays on the same server, using Direct I/O to bypass page cache and io_uring for async operations.
+
+```bash
+# Build with io_uring and NUMA support
+cargo build --release --features "io_uring,numa"
+
+# Transfer with maximum performance settings
+smartcopy /mnt/nvme0/genomics /mnt/nvme1/genomics \
+  --threads 16 \
+  --buffer-size 8M \
+  --direct-io \
+  --verify xxhash3 \
+  --pin-cores \
+  --progress
+
+# Expected throughput: 6+ GB/s on modern NVMe hardware
+```
+
+### Example 3: Remote Sync Over SSH (Native)
+
+Synchronize a project directory to a remote server, using delta transfer to only send changed blocks and SSH multiplexing for performance.
+
+```bash
+# Initial sync to remote server
+smartcopy /projects/webapp user@prod-server:/var/www/webapp \
+  --ssh \
+  --compress \
+  --verify xxhash3 \
+  --progress
+
+# Incremental sync (only changed files)
+smartcopy /projects/webapp user@prod-server:/var/www/webapp \
+  --ssh \
+  --incremental \
+  --delete-extra \
+  --compress
+
+# Delta sync (only changed blocks within files)
+smartcopy /projects/webapp user@prod-server:/var/www/webapp \
+  --ssh \
+  --delta \
+  --compress
+```
+
+### Example 4: QUIC Transfer on High-Speed Networks (Native)
+
+Transfer data between two data centers over a 100G link using QUIC transport with 0-RTT and congestion control.
+
+```bash
+# Build with QUIC support
+cargo build --release --features "quic,compression,numa"
+
+# On the receiving side: start an agent with QUIC
+smartcopy agent --protocol quic --port 9877 --bind 0.0.0.0
+
+# On the sending side: transfer via QUIC
+smartcopy /data/experiment-results quic://receiver.datacenter.net:9877/results \
+  --compress \
+  --threads 16 \
+  --pin-cores \
+  --verify xxhash3 \
+  --progress
+```
+
+### Example 5: Small File Optimization with Batch Streaming (Native)
+
+Copy a directory with millions of small files (e.g., npm node_modules, build caches) using TAR batch streaming to reduce per-file overhead.
+
+```bash
+# Build with batch support
+cargo build --release --features "batch"
+
+# Transfer with batch mode enabled
+smartcopy /build/cache /backup/build-cache \
+  --batch \
+  --batch-size-mb 64 \
+  --threads 8 \
+  --progress
+
+# Batch mode bundles small files (<1MB) into TAR archives internally,
+# reducing syscall overhead from millions of open/close operations.
+```
+
+### Example 6: Encrypted Backup to External Storage (Native)
+
+Create an encrypted backup of sensitive financial data using AES-256-GCM with Argon2 key derivation.
+
+```bash
+# Build with encryption
+cargo build --release --features "encryption"
+
+# Encrypt and copy
+smartcopy /data/financials /mnt/external/encrypted-backup \
+  --encrypt aes-256-gcm \
+  --kdf argon2 \
+  --verify blake3 \
+  --progress
+
+# Decrypt on restore
+smartcopy /mnt/external/encrypted-backup /data/restored \
+  --decrypt \
+  --verify blake3
+```
+
+### Example 7: Docker -- One-Shot File Copy Between Volumes
+
+Use the Docker image for a one-off copy job without installing SmartCopy on the host. Useful in CI/CD pipelines or ephemeral environments.
+
+```bash
+# Build the image
+docker build -t smartcopy:latest .
+
+# Copy from host path to another host path via mounted volumes
+docker run --rm \
+  -v /data/source:/source:ro \
+  -v /data/destination:/dest \
+  smartcopy:latest copy /source /dest \
+    --verify xxhash3 \
+    --threads 8 \
+    --progress
+
+# Incremental sync via Docker
+docker run --rm \
+  -v /data/source:/source:ro \
+  -v /data/destination:/dest \
+  smartcopy:latest copy /source /dest \
+    --incremental \
+    --verify xxhash3
+
+# Dry run to preview changes
+docker run --rm \
+  -v /data/source:/source:ro \
+  -v /data/destination:/dest \
+  smartcopy:latest copy /source /dest \
+    --dry-run
+```
+
+### Example 8: Docker -- Persistent Agent with Monitoring Stack
+
+Run SmartCopy as a long-running agent with full observability (dashboard, Prometheus, Grafana).
+
+```bash
+# Start the full stack
+docker-compose up -d
+
+# Verify all services are running
+docker-compose ps
+# NAME                  STATUS    PORTS
+# smartcopy-agent       Up        0.0.0.0:9878->9878, 0.0.0.0:9877->9877/udp
+# smartcopy-dashboard   Up        0.0.0.0:3000->3000
+# smartcopy-prometheus  Up        0.0.0.0:9090->9090
+# smartcopy-grafana     Up        0.0.0.0:3001->3000
+
+# Now use the agent from any machine on the network
+smartcopy /local/data tcp://docker-host:9878/remote-data \
+  --compress \
+  --verify xxhash3 \
+  --progress
+
+# Monitor transfers in real time:
+#   Dashboard:  http://docker-host:3000
+#   Prometheus: http://docker-host:9090
+#   Grafana:    http://docker-host:3001 (admin/smartcopy)
+
+# View agent logs
+docker-compose logs -f smartcopy-agent
+
+# Stop everything
+docker-compose down
+```
+
+### Example 9: Docker -- CI/CD Pipeline Artifact Copy
+
+Use SmartCopy in a CI/CD pipeline (GitHub Actions, GitLab CI) to copy build artifacts to a shared storage.
+
+```yaml
+# .github/workflows/deploy.yml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy artifacts to staging
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/dist:/source:ro \
+            -v /mnt/shared-storage/staging:/dest \
+            smartcopy:latest copy /source /dest \
+              --verify xxhash3 \
+              --threads 4 \
+              --progress
+```
+
+```yaml
+# .gitlab-ci.yml
+deploy:
+  image: smartcopy:latest
+  script:
+    - smartcopy /builds/$CI_PROJECT_PATH/dist /mnt/nfs/releases/$CI_COMMIT_TAG
+        --verify blake3
+        --threads 4
+        --progress
+```
+
+### Example 10: Docker -- Multi-Host Data Distribution
+
+Distribute data from a central server to multiple remote hosts, each running a SmartCopy agent in Docker.
+
+```bash
+# On each receiving host: start an agent container
+docker run -d --name smartcopy-agent \
+  -p 9878:9878 \
+  -v /data/shared:/data \
+  --restart unless-stopped \
+  smartcopy:latest agent --protocol tcp --port 9878 --bind 0.0.0.0
+
+# On the central server: distribute to all hosts in parallel
+for HOST in node01 node02 node03 node04; do
+  smartcopy /data/dataset tcp://${HOST}:9878/data/dataset \
+    --compress \
+    --verify xxhash3 \
+    --threads 8 &
+done
+wait
+echo "Distribution complete to all nodes"
+```
+
+### Example 11: Kubernetes -- Deploy and Transfer Between Pods
+
+Deploy SmartCopy on a Kubernetes cluster and use it to copy data between persistent volumes.
+
+```bash
+# Install SmartCopy on the cluster
+helm install smartcopy ./helm/smartcopy \
+  --namespace data-ops \
+  --create-namespace \
+  --set config.threads=8 \
+  --set config.verify="xxhash3"
+
+# Verify the DaemonSet is running on all nodes
+kubectl get daemonset -n data-ops -l app.kubernetes.io/name=smartcopy
+# NAME        DESIRED   CURRENT   READY   AGE
+# smartcopy   5         5         5       30s
+
+# Verify the API server deployment
+kubectl get deployment -n data-ops -l app.kubernetes.io/name=smartcopy
+# NAME               READY   UP-TO-DATE   AVAILABLE   AGE
+# smartcopy-server   1/1     1            1           30s
+
+# Execute a copy job from within the cluster
+kubectl exec -n data-ops daemonset/smartcopy -- \
+  smartcopy /mnt/source-pv /mnt/dest-pv \
+    --verify xxhash3 \
+    --threads 8 \
+    --progress
+```
+
+### Example 12: Kubernetes -- Batch Job for Large Migration
+
+Create a Kubernetes Job to migrate data between two PersistentVolumeClaims.
+
+```yaml
+# migration-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-migration
+  namespace: data-ops
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      containers:
+        - name: smartcopy
+          image: ghcr.io/smartcopy/smartcopy:latest
+          command:
+            - smartcopy
+            - /source
+            - /dest
+            - --verify
+            - blake3
+            - --threads
+            - "16"
+            - --buffer-size
+            - "8M"
+            - --progress
+          resources:
+            limits:
+              cpu: "8"
+              memory: 16Gi
+            requests:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: source-data
+              mountPath: /source
+              readOnly: true
+            - name: dest-data
+              mountPath: /dest
+      restartPolicy: OnFailure
+      volumes:
+        - name: source-data
+          persistentVolumeClaim:
+            claimName: research-data-pvc
+        - name: dest-data
+          persistentVolumeClaim:
+            claimName: archive-data-pvc
+```
+
+```bash
+# Run the migration job
+kubectl apply -f migration-job.yaml
+
+# Monitor progress
+kubectl logs -f job/data-migration -n data-ops
+
+# Check completion
+kubectl get job data-migration -n data-ops
+# NAME             COMPLETIONS   DURATION   AGE
+# data-migration   1/1           12m        12m
+```
+
+### Example 13: Kubernetes -- CronJob for Scheduled Backups
+
+Schedule automated nightly backups using a Kubernetes CronJob.
+
+```yaml
+# backup-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-backup
+  namespace: data-ops
+spec:
+  schedule: "0 2 * * *"  # Every day at 2:00 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: smartcopy
+              image: ghcr.io/smartcopy/smartcopy:latest
+              command:
+                - smartcopy
+                - /data/production
+                - /backup/nightly
+                - --incremental
+                - --verify
+                - xxhash3
+                - --threads
+                - "8"
+                - --delete-extra
+              volumeMounts:
+                - name: prod-data
+                  mountPath: /data/production
+                  readOnly: true
+                - name: backup-storage
+                  mountPath: /backup/nightly
+          restartPolicy: OnFailure
+          volumes:
+            - name: prod-data
+              persistentVolumeClaim:
+                claimName: production-pvc
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: backup-pvc
+```
+
+```bash
+# Apply the CronJob
+kubectl apply -f backup-cronjob.yaml
+
+# Verify schedule
+kubectl get cronjob nightly-backup -n data-ops
+# NAME             SCHEDULE    SUSPEND   ACTIVE   LAST SCHEDULE
+# nightly-backup   0 2 * * *   False     0        <none>
+
+# Manually trigger a run
+kubectl create job --from=cronjob/nightly-backup manual-backup -n data-ops
+
+# Check backup logs
+kubectl logs -f job/manual-backup -n data-ops
+```
+
+### Example 14: Kubernetes -- Multi-Namespace Data Sync with Monitoring
+
+Deploy SmartCopy with Prometheus monitoring and sync data across namespaces.
+
+```bash
+# Install with monitoring enabled
+helm install smartcopy ./helm/smartcopy \
+  --namespace data-ops \
+  --create-namespace \
+  -f - <<'EOF'
+agent:
+  enabled: true
+  resources:
+    limits:
+      cpu: "8"
+      memory: 16Gi
+
+config:
+  threads: 16
+  bufferSize: "8M"
+  compress: true
+  verify: "blake3"
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
+persistence:
+  enabled: true
+  storageClass: "fast-ssd"
+  size: 100Gi
+EOF
+
+# Verify monitoring integration
+kubectl get servicemonitor -n data-ops
+# NAME        AGE
+# smartcopy   10s
+
+# Access Prometheus targets (port-forward)
+kubectl port-forward -n data-ops svc/smartcopy 9090:9090 &
+
+# Check SmartCopy metrics
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | .labels.job'
+```
+
+### Example 15: TUI Dashboard for Interactive Monitoring (Native)
+
+Use the terminal-based dashboard to monitor a long-running transfer in real time.
+
+```bash
+# Build with TUI support
+cargo build --release --features "tui,numa"
+
+# Run a large transfer with TUI dashboard
+smartcopy /data/experiment-2024 /backup/experiment-2024 \
+  --tui \
+  --verify blake3 \
+  --threads 16 \
+  --pin-cores \
+  --progress
+
+# TUI provides:
+#   - Real-time progress gauge (percentage, files, bytes)
+#   - Throughput sparkline graph (last 60 samples)
+#   - Current file being transferred
+#   - ETA and elapsed time
+#   - Key bindings: q=quit, p=pause/resume
+```
+
+### Example 16: Parquet Manifest for Large-Scale Environments (Native)
+
+Use Parquet format for manifest storage when managing millions of files, providing better compression and query performance.
+
+```bash
+# Build with Parquet support
+cargo build --release --features "parquet_manifest"
+
+# First sync: generates .smartcopy-manifest.parquet
+smartcopy /data/hpc-cluster /backup/hpc-cluster \
+  --manifest-format parquet \
+  --verify xxhash3 \
+  --threads 16 \
+  --progress
+
+# Subsequent syncs: Parquet manifest enables fast diffing of 10M+ files
+smartcopy /data/hpc-cluster /backup/hpc-cluster \
+  --manifest-format parquet \
+  --incremental \
+  --verify xxhash3
+
+# Parquet format advantages over JSON:
+#   - 10x smaller manifest files via ZSTD columnar compression
+#   - Faster parsing with Arrow columnar reader
+#   - Efficient for millions of file entries
 ```
 
 ## Usage Scenarios & Flowcharts
