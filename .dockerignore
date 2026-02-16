@@ -1,0 +1,14 @@
+target/
+.git/
+.gitignore
+*.md
+!README.md
+.devcontainer/
+.vscode/
+.idea/
+helm/
+deploy/
+dashboard/node_modules/
+dashboard/dist/
+*.log
+.env

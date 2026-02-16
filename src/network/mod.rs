@@ -39,6 +39,9 @@ mod agent;
 mod quic;
 mod parallel_sync;
 
+#[cfg(feature = "batch")]
+pub mod batch;
+
 pub use ssh::*;
 pub use tcp::*;
 pub use ssh_tuning::*;
