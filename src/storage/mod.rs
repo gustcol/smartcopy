@@ -6,5 +6,8 @@
 mod s3;
 mod s5cmd;
 
+#[cfg(feature = "native_s3")]
+pub mod native_s3;
+
 pub use s3::*;
 pub use s5cmd::*;

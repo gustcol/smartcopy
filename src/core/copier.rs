@@ -12,7 +12,7 @@ use crate::progress::ProgressReporter;
 use crate::sync::ChunkedCopier;
 use rayon::prelude::*;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -80,6 +80,55 @@ pub struct VerificationSummary {
     pub mismatches: Vec<(String, String, String)>,
 }
 
+/// Semaphore-like backpressure limiter using atomics.
+///
+/// Limits the number of in-flight file operations to prevent memory
+/// exhaustion on million-file transfers. Uses a spin-yield strategy
+/// which is appropriate for I/O-bound workloads.
+struct BackpressureLimiter {
+    in_flight: Arc<AtomicUsize>,
+    max_concurrent: usize,
+}
+
+impl BackpressureLimiter {
+    fn new(max_concurrent: usize) -> Self {
+        Self {
+            in_flight: Arc::new(AtomicUsize::new(0)),
+            max_concurrent,
+        }
+    }
+
+    /// Acquire a permit. Blocks (spinning with yield) until capacity is available.
+    fn acquire(&self) -> BackpressurePermit {
+        loop {
+            let current = self.in_flight.load(Ordering::Acquire);
+            if current < self.max_concurrent {
+                if self
+                    .in_flight
+                    .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    return BackpressurePermit {
+                        in_flight: Arc::clone(&self.in_flight),
+                    };
+                }
+            }
+            std::thread::yield_now();
+        }
+    }
+}
+
+/// RAII permit that decrements the counter on drop.
+struct BackpressurePermit {
+    in_flight: Arc<AtomicUsize>,
+}
+
+impl Drop for BackpressurePermit {
+    fn drop(&mut self) {
+        self.in_flight.fetch_sub(1, Ordering::Release);
+    }
+}
+
 /// Main copy engine
 pub struct CopyEngine {
     /// Configuration
@@ -90,6 +139,8 @@ pub struct CopyEngine {
     progress: Option<ProgressReporter>,
     /// Cancellation flag
     cancelled: Arc<AtomicBool>,
+    /// Maximum concurrent in-flight files (0 = auto: 2x CPU count)
+    max_concurrent: usize,
 }
 
 impl CopyEngine {
@@ -115,7 +166,15 @@ impl CopyEngine {
             copier: FileCopier::new(copy_options),
             progress: None,
             cancelled: Arc::new(AtomicBool::new(false)),
+            max_concurrent: 0,
         }
+    }
+
+    /// Set maximum concurrent in-flight files for backpressure control.
+    /// 0 means auto (2x CPU count).
+    pub fn with_max_concurrent(mut self, max: usize) -> Self {
+        self.max_concurrent = max;
+        self
     }
 
     /// Set progress reporter
@@ -217,13 +276,13 @@ impl CopyEngine {
         scanner.scan_sorted(&self.config.source, self.config.ordering)
     }
 
-    /// Copy files in parallel using rayon
+    /// Copy files in parallel using rayon with backpressure control
     fn copy_files_parallel(
         &self,
         scan_result: &ScanResult,
     ) -> Result<(u64, u64, Vec<(String, String)>, Vec<(String, HashResult)>)> {
         let threads = if self.config.threads == 0 {
-            num_cpus::get()
+            crate::system::numa::get_available_cpus()
         } else {
             self.config.threads
         };
@@ -233,6 +292,14 @@ impl CopyEngine {
             .num_threads(threads)
             .build()
             .map_err(|e| SmartCopyError::ThreadPoolError(e.to_string()))?;
+
+        // Backpressure limiter: cap in-flight files to prevent memory exhaustion
+        let max_concurrent = if self.max_concurrent == 0 {
+            threads * 2
+        } else {
+            self.max_concurrent
+        };
+        let limiter = BackpressureLimiter::new(max_concurrent);
 
         let dest = &self.config.destination;
         let verify_algo = self.config.verify;
@@ -247,6 +314,9 @@ impl CopyEngine {
                     if cancelled.load(Ordering::SeqCst) {
                         return None;
                     }
+
+                    // Acquire backpressure permit before starting file copy
+                    let _permit = limiter.acquire();
 
                     let result = self.copy_single_file(entry, dest, verify_algo);
 
