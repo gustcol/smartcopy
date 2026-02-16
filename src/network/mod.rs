@@ -42,6 +42,9 @@ mod parallel_sync;
 #[cfg(feature = "batch")]
 pub mod batch;
 
+#[cfg(feature = "tls_gen")]
+pub mod tls;
+
 pub use ssh::*;
 pub use tcp::*;
 pub use ssh_tuning::*;

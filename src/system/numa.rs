@@ -347,6 +347,85 @@ pub fn read_cgroup_allowed_cpus() -> Vec<usize> {
     (0..num_cpus::get()).collect()
 }
 
+/// Detect the CPU quota from cgroup v1 or v2 configuration.
+///
+/// Returns the fractional number of CPUs available (e.g., 2.5 means
+/// two and a half CPU cores). Returns `None` if no cgroup quota is set
+/// or if running outside a container.
+///
+/// - **cgroup v2**: reads `/sys/fs/cgroup/cpu.max` (format: `max_us period_us` or `max period_us`)
+/// - **cgroup v1**: reads `cpu.cfs_quota_us` and `cpu.cfs_period_us` from the cpu controller
+#[cfg(target_os = "linux")]
+pub fn get_container_cpu_quota() -> Option<f64> {
+    // Try cgroup v2 first: /sys/fs/cgroup/cpu.max
+    if let Ok(content) = std::fs::read_to_string("/sys/fs/cgroup/cpu.max") {
+        let content = content.trim();
+        let parts: Vec<&str> = content.split_whitespace().collect();
+        if parts.len() == 2 {
+            if parts[0] == "max" {
+                // "max" means unlimited
+                return None;
+            }
+            if let (Ok(quota), Ok(period)) = (
+                parts[0].parse::<f64>(),
+                parts[1].parse::<f64>(),
+            ) {
+                if period > 0.0 {
+                    return Some(quota / period);
+                }
+            }
+        }
+    }
+
+    // Try cgroup v1: /sys/fs/cgroup/cpu/cpu.cfs_quota_us and cpu.cfs_period_us
+    let quota_path = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us";
+    let period_path = "/sys/fs/cgroup/cpu/cpu.cfs_period_us";
+
+    if let (Ok(quota_str), Ok(period_str)) = (
+        std::fs::read_to_string(quota_path),
+        std::fs::read_to_string(period_path),
+    ) {
+        if let (Ok(quota), Ok(period)) = (
+            quota_str.trim().parse::<i64>(),
+            period_str.trim().parse::<i64>(),
+        ) {
+            if quota < 0 {
+                // -1 means unlimited
+                return None;
+            }
+            if period > 0 {
+                return Some(quota as f64 / period as f64);
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn get_container_cpu_quota() -> Option<f64> {
+    None
+}
+
+/// Get the effective number of available CPUs, respecting container quotas.
+///
+/// Prefers the cgroup CPU quota if set, otherwise falls back to
+/// `std::thread::available_parallelism()` then `num_cpus::get()`.
+pub fn get_available_cpus() -> usize {
+    // Check cgroup quota first
+    if let Some(quota) = get_container_cpu_quota() {
+        let cpus = quota.ceil() as usize;
+        if cpus > 0 {
+            return cpus;
+        }
+    }
+
+    // Fall back to standard detection
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or_else(|_| num_cpus::get())
+}
+
 /// Manages pinning rayon worker threads to specific CPU cores for
 /// maximum cache locality and minimal cross-core traffic.
 pub struct WorkerPinner {
@@ -473,5 +552,23 @@ mod tests {
         assert!(pool.is_ok());
         let pool = pool.unwrap();
         assert!(pool.current_num_threads() > 0);
+    }
+
+    #[test]
+    fn test_get_available_cpus() {
+        let cpus = get_available_cpus();
+        assert!(cpus >= 1, "Should detect at least 1 CPU");
+    }
+
+    #[test]
+    fn test_container_cpu_quota_returns_option() {
+        // On most dev machines this returns None (no cgroup quota).
+        // In containers it returns Some(fractional_cpus).
+        let quota = get_container_cpu_quota();
+        if let Some(q) = quota {
+            assert!(q > 0.0, "CPU quota should be positive if set");
+        }
+        // Either way, get_available_cpus should still work
+        assert!(get_available_cpus() >= 1);
     }
 }

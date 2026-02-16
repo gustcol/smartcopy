@@ -12,6 +12,167 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+/// TCP stream tuning configuration.
+///
+/// Provides presets for different network environments and manual override
+/// for each socket option.
+#[derive(Debug, Clone)]
+pub struct TcpStreamConfig {
+    /// Disable Nagle's algorithm (send immediately, no batching)
+    pub tcp_nodelay: bool,
+    /// Enable TCP keepalive with this interval (seconds)
+    pub keepalive_secs: Option<u32>,
+    /// Send buffer size in bytes (0 = OS default)
+    pub send_buffer_size: usize,
+    /// Receive buffer size in bytes (0 = OS default)
+    pub recv_buffer_size: usize,
+}
+
+impl Default for TcpStreamConfig {
+    fn default() -> Self {
+        Self::lan()
+    }
+}
+
+impl TcpStreamConfig {
+    /// LAN preset: optimized for trusted high-speed local networks.
+    pub fn lan() -> Self {
+        Self {
+            tcp_nodelay: true,
+            keepalive_secs: Some(30),
+            send_buffer_size: 4 * 1024 * 1024,   // 4 MB
+            recv_buffer_size: 4 * 1024 * 1024,    // 4 MB
+        }
+    }
+
+    /// WAN preset: optimized for higher-latency internet connections.
+    /// Uses larger buffers to fill the bandwidth-delay product.
+    pub fn wan() -> Self {
+        Self {
+            tcp_nodelay: true,
+            keepalive_secs: Some(30),
+            send_buffer_size: 8 * 1024 * 1024,    // 8 MB
+            recv_buffer_size: 8 * 1024 * 1024,     // 8 MB
+        }
+    }
+
+    /// High-speed preset: for 10G+ networks.
+    /// Maximize socket buffers for full line-rate utilization.
+    pub fn high_speed() -> Self {
+        Self {
+            tcp_nodelay: true,
+            keepalive_secs: Some(30),
+            send_buffer_size: 16 * 1024 * 1024,   // 16 MB
+            recv_buffer_size: 16 * 1024 * 1024,    // 16 MB
+        }
+    }
+
+    /// Compute optimal buffer size from bandwidth (bytes/sec) and RTT (ms).
+    ///
+    /// The bandwidth-delay product (BDP) determines the minimum buffer needed
+    /// to fully utilize the link:
+    ///   BDP = bandwidth_bytes_per_sec * rtt_seconds
+    ///
+    /// We use 2x BDP for headroom and clamp to a reasonable range.
+    pub fn from_bandwidth_delay(bandwidth_bytes_per_sec: u64, rtt_ms: u32) -> Self {
+        let bdp = (bandwidth_bytes_per_sec as f64) * (rtt_ms as f64 / 1000.0);
+        let buf_size = (bdp * 2.0) as usize;
+
+        // Clamp between 256 KB and 64 MB
+        let buf_size = buf_size.max(256 * 1024).min(64 * 1024 * 1024);
+
+        Self {
+            tcp_nodelay: true,
+            keepalive_secs: Some(30),
+            send_buffer_size: buf_size,
+            recv_buffer_size: buf_size,
+        }
+    }
+}
+
+/// Apply TCP tuning configuration to a connected stream.
+///
+/// Best-effort: logs warnings but doesn't fail if some options can't be set
+/// (e.g., buffer sizes may be capped by OS `net.core.wmem_max`).
+pub fn apply_tcp_tuning(stream: &TcpStream, config: &TcpStreamConfig) -> std::io::Result<()> {
+    stream.set_nodelay(config.tcp_nodelay)?;
+
+    if let Some(secs) = config.keepalive_secs {
+        let keepalive = Duration::from_secs(secs as u64);
+        // set_keepalive is not in std; we use the socket2 approach via raw fd
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let fd = stream.as_raw_fd();
+            let enable: libc::c_int = 1;
+            unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_KEEPALIVE,
+                    &enable as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+
+            // Set keepalive interval on Linux
+            #[cfg(target_os = "linux")]
+            unsafe {
+                let interval = secs as libc::c_int;
+                libc::setsockopt(
+                    fd,
+                    libc::IPPROTO_TCP,
+                    libc::TCP_KEEPIDLE,
+                    &interval as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+                libc::setsockopt(
+                    fd,
+                    libc::IPPROTO_TCP,
+                    libc::TCP_KEEPINTVL,
+                    &interval as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+        }
+    }
+
+    // Set socket buffer sizes (best-effort, OS may cap)
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = stream.as_raw_fd();
+
+        if config.send_buffer_size > 0 {
+            let size = config.send_buffer_size as libc::c_int;
+            unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_SNDBUF,
+                    &size as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+        }
+
+        if config.recv_buffer_size > 0 {
+            let size = config.recv_buffer_size as libc::c_int;
+            unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVBUF,
+                    &size as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Magic bytes for protocol identification
 const PROTOCOL_MAGIC: &[u8; 8] = b"SMCOPY01";
 
@@ -408,6 +569,52 @@ mod tests {
                 assert_eq!(i, msg_type as u8);
             }
         }
+    }
+
+    #[test]
+    fn test_tcp_stream_config_presets() {
+        let lan = TcpStreamConfig::lan();
+        assert!(lan.tcp_nodelay);
+        assert_eq!(lan.keepalive_secs, Some(30));
+        assert_eq!(lan.send_buffer_size, 4 * 1024 * 1024);
+
+        let wan = TcpStreamConfig::wan();
+        assert_eq!(wan.send_buffer_size, 8 * 1024 * 1024);
+
+        let hs = TcpStreamConfig::high_speed();
+        assert_eq!(hs.send_buffer_size, 16 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_bandwidth_delay_product() {
+        // 1 Gbps (125 MB/s) with 10ms RTT -> BDP ~1.25 MB, 2x = 2.5 MB
+        let config = TcpStreamConfig::from_bandwidth_delay(125_000_000, 10);
+        assert!(config.send_buffer_size >= 2_000_000);
+        assert!(config.send_buffer_size <= 64 * 1024 * 1024);
+
+        // Very slow link: should clamp to minimum 256 KB
+        let config = TcpStreamConfig::from_bandwidth_delay(1000, 1);
+        assert_eq!(config.send_buffer_size, 256 * 1024);
+
+        // Very fast link with high latency: should clamp to max 64 MB
+        let config = TcpStreamConfig::from_bandwidth_delay(50_000_000_000, 100);
+        assert_eq!(config.send_buffer_size, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_apply_tcp_tuning_on_connected_stream() {
+        // Create a listener and connect to it
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = TcpStream::connect(addr).unwrap();
+        let config = TcpStreamConfig::lan();
+
+        // Should not error
+        apply_tcp_tuning(&client, &config).unwrap();
+
+        // Verify nodelay was set
+        assert!(client.nodelay().unwrap());
     }
 
     #[test]

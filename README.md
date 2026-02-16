@@ -91,21 +91,27 @@ SmartCopy is a blazingly fast, intelligent file copy utility designed for High-P
 - **SSH Tuning**: ControlMaster multiplexing, fast ciphers (chacha20-poly1305, aes128-gcm)
 - **Remote Agent**: rsync-like remote agent for delta sync over SSH pipe
 - **QUIC Transport**: HTTP/3-like protocol with 0-RTT, multiplexing, and modern congestion control
-- **Direct TCP**: Maximum throughput mode for trusted LANs
+- **Direct TCP**: Maximum throughput mode for trusted LANs with tunable socket parameters
 - **LZ4 Compression**: Ultra-fast on-the-fly compression (<1 GB/s overhead)
+- **Zstd Compression**: High-ratio compression for batch TAR streaming
 - **Bandwidth Limiting**: Optional rate limiting for shared networks
 - **SMB Multichannel**: Automatic detection and optimization for SMB3 shares
 - **NFS Optimization**: Parallel NFS (pNFS) aware with optimized buffer sizes
+- **Native AWS S3 SDK**: Connection-pooled S3 client with multipart uploads, replacing CLI subprocess calls
+- **Self-Signed TLS Generation**: Auto-generated certificates with SAN support and caching (rcgen)
 
 ### System Optimization
 
 - **NUMA Awareness**: Thread pinning to memory nodes for multi-socket systems with automatic topology detection
+- **Cgroup CPU Quota Detection**: Respects container CPU limits (cgroup v1/v2) for right-sized thread pools
 - **Tuning Recommendations**: Kernel, network, and storage parameter suggestions
 - **Storage Type Detection**: Automatic optimization for NVMe, SSD, HDD, NFS, SMB/CIFS
 - **Memory Management**: Efficient buffer pooling and reuse
 - **Adaptive I/O**: Automatically selects best copy method based on filesystem type
 - **Bandwidth Throttling**: Rate limiting with token-bucket algorithm for shared networks
+- **Backpressure Control**: Semaphore-based in-flight file limiter prevents memory exhaustion on million-file transfers
 - **Extended Attributes**: Full xattr/ACL preservation on Unix systems
+- **TCP Connection Tuning**: Preset profiles (LAN/WAN/High-Speed) with bandwidth-delay product buffer sizing
 
 ### File Handling
 
@@ -159,8 +165,11 @@ cargo build --release --features "encryption,numa,quic"
 | `numa` | NUMA topology + CPU affinity | hwloc2, core_affinity | ❌ No |
 | `quic` | QUIC/HTTP3 transport | quinn, rustls | ❌ No |
 | `io_uring` | Linux io_uring async I/O | io-uring | ❌ No |
-| `parquet_manifest` | Parquet manifest format (Arrow/ZSTD) | arrow, parquet | ❌ No |
+| `parquet_manifest` | Parquet manifest format (Arrow v55/ZSTD) | arrow, parquet | ❌ No |
 | `batch` | TAR batch streaming for small files | tar | ❌ No |
+| `batch_zstd` | Zstd compression for TAR batches | tar, zstd | ❌ No |
+| `native_s3` | Native AWS SDK S3 client (replaces CLI) | aws-sdk-s3, aws-config | ❌ No |
+| `tls_gen` | Self-signed TLS certificate generation | rcgen | ❌ No |
 | `tui` | Terminal UI dashboard (Ratatui) | ratatui, crossterm | ❌ No |
 
 **Feature Combinations:**
@@ -169,14 +178,17 @@ cargo build --release --features "encryption,numa,quic"
 # HPC cluster with encryption and CPU pinning
 cargo build --release --features "encryption,numa"
 
-# High-speed network transfers with batch streaming
-cargo build --release --features "quic,compression,batch"
+# High-speed network transfers with batch streaming + Zstd compression
+cargo build --release --features "quic,compression,batch,batch_zstd"
 
 # Maximum performance on Linux with Parquet manifests
 cargo build --release --features "io_uring,numa,parquet_manifest"
 
+# Cloud-native with native S3 SDK and TLS generation
+cargo build --release --features "native_s3,tls_gen,batch"
+
 # Full-featured with TUI dashboard
-cargo build --release --features "tui,parquet_manifest,batch,numa"
+cargo build --release --features "tui,parquet_manifest,batch,batch_zstd,numa,native_s3,tls_gen"
 ```
 
 ## Quick Start
@@ -2371,6 +2383,17 @@ SmartCopy uses multiple optimization techniques:
 | Chunked Transfer | Parallel chunks for huge files |
 | Parallel Scanning | Multi-threaded directory traversal |
 | NUMA Awareness | Pin threads to memory nodes |
+| Backpressure Control | Semaphore-based limit on in-flight files (`--max-concurrent`) |
+| Cgroup CPU Quota | Respects container CPU limits (v1/v2) for right-sized thread pools |
+| Adaptive Batch Sizing | Self-tuning batch sizes based on processing throughput |
+
+### Memory Efficiency
+
+| Technique | Description |
+|-----------|-------------|
+| Patricia Tree | Radix trie for path deduplication with 8-byte-at-a-time prefix comparison |
+| Slab Allocation | Pre-allocated node pool avoids per-path heap allocation |
+| Full LTO | Cross-crate link-time optimization for smaller, faster binaries |
 
 ### Network
 
@@ -2378,7 +2401,11 @@ SmartCopy uses multiple optimization techniques:
 |-----------|-------------|
 | Parallel Streams | Multiple SSH/TCP connections |
 | LZ4 Compression | Ultra-fast compression (<1GB/s overhead) |
+| Zstd Compression | High-ratio compression for batch TAR streaming |
+| TCP Tuning Presets | LAN/WAN/High-Speed socket buffer profiles with BDP-based sizing |
 | Pipelining | Overlap I/O and network transfer |
+| Worker Pool Batching | Persistent worker threads for TAR creation (1 per CPU core) |
+| Native S3 SDK | Connection-pooled HTTP/2 client with multipart uploads |
 
 ### Network Filesystem Optimization
 
