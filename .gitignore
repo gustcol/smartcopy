@@ -21,7 +21,7 @@ dashboard/node_modules/
 dashboard/dist/
 
 # Local tool configuration
-.claude/*.local.md
+*.local.md
 
 # Debug/profiling
 *.dSYM/
