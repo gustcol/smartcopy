@@ -7,6 +7,41 @@
 
 SmartCopy is a blazingly fast, intelligent file copy utility designed for High-Performance Computing (HPC) environments. Built in Rust for maximum performance, memory safety, and zero-cost abstractions.
 
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Usage Scenarios & Flowcharts](#usage-scenarios--flowcharts)
+- [CLI Reference](#cli-reference)
+- [Advanced Remote Transfer](#advanced-remote-transfer)
+- [High-Speed Network Tuning](#high-speed-network-tuning-10g100g200g400g)
+- [Agent Installation & Deployment](#agent-installation--deployment)
+- [Docker Deployment](#docker-deployment)
+- [Kubernetes Deployment](#kubernetes-deployment)
+- [API Server](#api-server)
+- [Monitoring Dashboard](#monitoring-dashboard)
+- [Parallel Remote Sync](#parallel-remote-sync)
+- [Sparse File Support](#sparse-file-support)
+- [Resume Interrupted Transfers](#resume-interrupted-transfers)
+- [Bandwidth Scheduling](#bandwidth-scheduling)
+- [HPC Job Scheduler Integration](#hpc-job-scheduler-integration)
+- [S3/Object Storage Support](#s3object-storage-support)
+- [Encryption at Rest](#encryption-at-rest-optional-module)
+- [Windows ACL Support](#windows-acl-support)
+- [Library Usage](#library-usage)
+- [Performance Optimizations](#performance-optimizations)
+- [System Tuning Recommendations](#system-tuning-recommendations)
+- [Architecture](#architecture)
+- [Benchmarks](#benchmarks)
+- [Future Ideas & Roadmap](#future-ideas--roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
 ## Features
 
 ### Core Capabilities
