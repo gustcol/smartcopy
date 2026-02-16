@@ -105,7 +105,7 @@ pub fn handle_create_job(state: &AppState, request: CreateJobRequest) -> Result<
         name: request.name.unwrap_or_else(|| format!("Job {}", &job_id[..8])),
         source: request.source,
         destination: request.destination,
-        status: if request.start_immediately { JobStatus::Pending } else { JobStatus::Pending },
+        status: if request.start_immediately { JobStatus::Running } else { JobStatus::Pending },
         config: request.config,
         progress: JobProgress::default(),
         started_at: None,
@@ -309,14 +309,17 @@ mod uuid {
                 .unwrap()
                 .as_nanos();
 
-            let random: u64 = now as u64 ^ std::process::id() as u64;
+            // Mix timestamp with process ID and pointer address for better uniqueness
+            let random: u64 = now as u64
+                ^ (std::process::id() as u64).rotate_left(32)
+                ^ (&now as *const _ as u64);
 
             UuidValue(format!(
                 "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
                 (now >> 96) as u32,
                 (now >> 80) as u16,
-                (now >> 64) as u16,
-                (random >> 48) as u16,
+                ((now >> 64) as u16 & 0x0FFF) | 0x4000, // version 4 marker
+                (random >> 48) as u16 | 0x8000, // variant bits
                 random & 0xFFFFFFFFFFFF
             ))
         }

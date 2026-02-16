@@ -298,6 +298,13 @@ impl IoUringCopier {
                 });
             }
 
+            if (bytes_written as usize) != bytes_read {
+                return Err(SmartCopyError::IoError {
+                    path: dest.to_path_buf(),
+                    message: format!("io_uring short write: expected {} bytes, wrote {}", bytes_read, bytes_written),
+                });
+            }
+
             offset += bytes_read as u64;
             bytes_copied += bytes_read as u64;
         }

@@ -460,7 +460,9 @@ impl QuicServer {
                 exists: true,
                 size: meta.len(),
                 mtime: meta.modified()
-                    .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
                     .unwrap_or(0),
                 is_dir: meta.is_dir(),
             },

@@ -155,9 +155,12 @@ fn handle_connection(
     let method = parts[0];
     let path = parts[1];
 
-    // Read headers
+    // Read headers (with limits to prevent DoS)
+    const MAX_HEADERS: usize = 100;
+    const MAX_HEADER_SIZE: usize = 8192;
     let mut headers: Vec<(String, String)> = Vec::new();
     let mut content_length = 0usize;
+    let mut total_header_bytes = 0usize;
 
     loop {
         let mut line = String::new();
@@ -165,6 +168,11 @@ fn handle_connection(
 
         if line.trim().is_empty() {
             break;
+        }
+
+        total_header_bytes += line.len();
+        if headers.len() >= MAX_HEADERS || total_header_bytes > MAX_HEADER_SIZE {
+            return send_error(&mut stream, 400, "Headers too large", config);
         }
 
         if let Some((key, value)) = line.trim().split_once(':') {
@@ -368,25 +376,28 @@ fn parse_query_string(query: &str) -> std::collections::HashMap<String, String> 
         .collect()
 }
 
-/// Simple URL decoding
+/// Simple URL decoding with proper UTF-8 handling
 fn urlencoding_decode(s: &str) -> String {
-    let mut result = String::new();
+    let mut bytes = Vec::new();
     let mut chars = s.chars().peekable();
 
     while let Some(c) = chars.next() {
         if c == '%' {
             let hex: String = chars.by_ref().take(2).collect();
             if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
+                bytes.push(byte);
             }
         } else if c == '+' {
-            result.push(' ');
+            bytes.push(b' ');
         } else {
-            result.push(c);
+            // Encode the char as UTF-8 bytes
+            let mut buf = [0u8; 4];
+            let encoded = c.encode_utf8(&mut buf);
+            bytes.extend_from_slice(encoded.as_bytes());
         }
     }
 
-    result
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).to_string())
 }
 
 /// Send JSON response
