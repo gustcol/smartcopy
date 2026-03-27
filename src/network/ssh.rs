@@ -8,8 +8,9 @@ use crate::error::{Result, SmartCopyError};
 use crate::fs::FileEntry;
 use ssh2::{Session, Sftp};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
+use std::time::Duration;
 
 /// SSH connection for remote transfers
 pub struct SshConnection {
@@ -25,7 +26,19 @@ impl SshConnection {
     /// Connect to remote host
     pub fn connect(config: &RemoteConfig) -> Result<Self> {
         let addr = format!("{}:{}", config.host, config.port);
-        let tcp = TcpStream::connect(&addr)
+        let sock_addr = addr.to_socket_addrs()
+            .map_err(|e| SmartCopyError::connection(&config.host, e.to_string()))?
+            .next()
+            .ok_or_else(|| SmartCopyError::connection(&config.host, "Could not resolve address"))?;
+
+        // Bug 2: Use connect_timeout instead of connect (10s timeout)
+        let tcp = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(10))
+            .map_err(|e| SmartCopyError::connection(&config.host, e.to_string()))?;
+
+        // Bug 2: Set TCP read/write timeouts (30s)
+        tcp.set_read_timeout(Some(Duration::from_secs(30)))
+            .map_err(|e| SmartCopyError::connection(&config.host, e.to_string()))?;
+        tcp.set_write_timeout(Some(Duration::from_secs(30)))
             .map_err(|e| SmartCopyError::connection(&config.host, e.to_string()))?;
 
         let mut session = Session::new()
@@ -34,6 +47,9 @@ impl SshConnection {
         session.set_tcp_stream(tcp);
         session.handshake()
             .map_err(|e| SmartCopyError::connection(&config.host, e.to_string()))?;
+
+        // Bug 3: Set SSH keepalive (every 15 seconds)
+        session.set_keepalive(true, 15);
 
         // Authenticate
         Self::authenticate(&mut session, config)?;
@@ -96,8 +112,35 @@ impl SshConnection {
         Ok(())
     }
 
-    /// Upload a file to remote host
+    /// Upload a file to remote host with retry and exponential backoff
     pub fn upload(&self, local_path: &Path, remote_path: &Path) -> Result<u64> {
+        let max_retries = 5u32;
+        let base_delay = Duration::from_secs(2);
+        let mut last_err = None;
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                let delay = base_delay * 2u32.pow(attempt - 1);
+                std::thread::sleep(delay);
+            }
+
+            match self.upload_inner(local_path, remote_path) {
+                Ok(bytes) => return Ok(bytes),
+                Err(e) => {
+                    tracing::warn!(
+                        "Upload attempt {}/{} failed for {:?}: {}",
+                        attempt + 1, max_retries + 1, local_path, e
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap())
+    }
+
+    /// Inner upload implementation
+    fn upload_inner(&self, local_path: &Path, remote_path: &Path) -> Result<u64> {
         let local_file = std::fs::File::open(local_path)
             .map_err(|e| SmartCopyError::io(local_path, e))?;
         let _size = local_file.metadata()
@@ -134,8 +177,35 @@ impl SshConnection {
         Ok(bytes_copied)
     }
 
-    /// Download a file from remote host
+    /// Download a file from remote host with retry and exponential backoff
     pub fn download(&self, remote_path: &Path, local_path: &Path) -> Result<u64> {
+        let max_retries = 5u32;
+        let base_delay = Duration::from_secs(2);
+        let mut last_err = None;
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                let delay = base_delay * 2u32.pow(attempt - 1);
+                std::thread::sleep(delay);
+            }
+
+            match self.download_inner(remote_path, local_path) {
+                Ok(bytes) => return Ok(bytes),
+                Err(e) => {
+                    tracing::warn!(
+                        "Download attempt {}/{} failed for {:?}: {}",
+                        attempt + 1, max_retries + 1, remote_path, e
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap())
+    }
+
+    /// Inner download implementation
+    fn download_inner(&self, remote_path: &Path, local_path: &Path) -> Result<u64> {
         // Ensure local parent directory exists
         if let Some(parent) = local_path.parent() {
             std::fs::create_dir_all(parent)

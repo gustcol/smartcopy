@@ -362,7 +362,7 @@ impl CopyEngine {
         Ok((files_copied, bytes_copied, failures, hashes))
     }
 
-    /// Copy a single file
+    /// Copy a single file with retry logic
     fn copy_single_file(
         &self,
         entry: &FileEntry,
@@ -393,6 +393,36 @@ impl CopyEngine {
             return Ok((entry.size, None));
         }
 
+        // Retry loop using config.retries and config.retry_delay
+        let max_retries = self.config.retries;
+        let retry_delay = Duration::from_secs(self.config.retry_delay);
+        let mut last_err = None;
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                tracing::warn!(
+                    "Retry {}/{} for {:?}",
+                    attempt, max_retries, entry.path
+                );
+                std::thread::sleep(retry_delay);
+            }
+
+            match self.copy_single_file_inner(entry, &dest_path, verify_algo) {
+                Ok(result) => return Ok(result),
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        Err(last_err.unwrap())
+    }
+
+    /// Inner copy implementation (no retry)
+    fn copy_single_file_inner(
+        &self,
+        entry: &FileEntry,
+        dest_path: &Path,
+        verify_algo: Option<HashAlgorithm>,
+    ) -> Result<(u64, Option<HashResult>)> {
         // Determine file size category for optimal copy strategy
         let size_category = FileSizeCategory::from_size(entry.size);
 
@@ -404,10 +434,10 @@ impl CopyEngine {
             let workers = num_cpus::get().max(4);
             let chunked_copier = ChunkedCopier::new(chunk_size, workers);
 
-            let result = chunked_copier.copy_parallel(&entry.path, &dest_path)?;
+            let result = chunked_copier.copy_parallel(&entry.path, dest_path)?;
 
             // Preserve attributes
-            self.copier.preserve_attributes(&entry.path, &dest_path)?;
+            self.copier.preserve_attributes(&entry.path, dest_path)?;
 
             // If verification is requested, compute a proper streaming hash of the
             // source file. We can't use per-chunk composite hashes because they won't
@@ -425,11 +455,11 @@ impl CopyEngine {
         // Copy with or without hashing
         if let Some(algo) = verify_algo {
             let mut hasher = StreamingHasher::new(algo);
-            self.copier.copy_with_hash(&entry.path, &dest_path, &mut hasher)?;
+            self.copier.copy_with_hash(&entry.path, dest_path, &mut hasher)?;
             let hash = hasher.finalize();
             Ok((entry.size, Some(hash)))
         } else {
-            let stats = self.copier.copy(&entry.path, &dest_path)?;
+            let stats = self.copier.copy(&entry.path, dest_path)?;
             Ok((stats.bytes_copied, None))
         }
     }

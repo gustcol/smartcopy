@@ -779,10 +779,17 @@ impl AgentServer {
 
         let hash = match algorithm.to_lowercase().as_str() {
             "xxhash3" | "xxh3" => {
-                let mut buffer = Vec::new();
-                file.read_to_end(&mut buffer)
-                    .map_err(|e| SmartCopyError::io(path, e))?;
-                format!("{:016x}", xxhash_rust::xxh3::xxh3_64(&buffer))
+                let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+                let mut buffer = [0u8; 65536];
+                loop {
+                    let bytes_read = file.read(&mut buffer)
+                        .map_err(|e| SmartCopyError::io(path, e))?;
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    hasher.update(&buffer[..bytes_read]);
+                }
+                format!("{:016x}", hasher.digest())
             }
             "blake3" => {
                 let mut hasher = blake3::Hasher::new();
